@@ -1,16 +1,24 @@
 # RaveForge
 
-An elegant, zero-dependency Python builder for Medidata Rave ODM XML.
+An elegant Python builder for Medidata Rave ODM XML.
 
-Let's be honest: pushing clinical data, lab results, or AI risk scores into Medidata Rave Web Services (RWS) is usually a headache. Integration pipelines quickly turn into a mess of fragile XML string concatenations, nested dictionary hacks, and constant wrestling with `mdsol` namespaces. 
+Pushing clinical data, lab results, operational signals, or AI-derived outputs into Medidata Rave Web Services (RWS) often becomes a mess of fragile XML string concatenation, namespace issues, and hard-to-maintain hierarchy handling. RaveForge was built to make that process clean, explicit, and reliable.
 
-RaveForge was built to fix that. It is a stateful, fluent Python engine that translates flat data into perfectly nested, RWS-compliant ODM XML without you ever having to write or format a single XML tag.
+RaveForge is a fluent, stateful Python engine for building RWS-friendly ODM XML without manually writing XML tags. It helps you construct properly nested `Subject > Event > Form > ItemGroup > Item` structures and optionally submit them through a lightweight RWS client.
 
-## Why use RaveForge?
+---
 
-* **It remembers your state:** Clinical data is deeply nested (`Subject > Event > Form > ItemGroup`). Because RaveForge is stateful, you set the context once, and the library automatically attaches your data points exactly where they belong.
-* **Fails locally, not on the network:** If you accidentally try to add an item before defining a form, RaveForge throws a clear Python error immediately. It prevents you from pushing malformed CDISC hierarchies to Rave, saving you from expensive, silent HTTP timeouts.
-* **Zero dependencies:** It is built entirely on the Python Standard Library. No bloated requirements, making it incredibly easy to install and approve in locked-down corporate clinical environments.
+## Features
+
+- Fluent builder API for CDISC ODM clinical data transactions
+- Stateful hierarchy handling for `Subject > Event > Form > ItemGroup > Item`
+- Early hierarchy validation with clear Python exceptions
+- Support for Medidata-specific `mdsol` extensions
+- Query generation with configurable status and recipient
+- Support for item `SpecifyValue`
+- Pretty-printed XML output for debugging
+- Thin RWS client for submission to Medidata RWS
+- Tested with `pytest`
 
 ---
 
@@ -20,72 +28,116 @@ RaveForge was built to fix that. It is a stateful, fluent Python engine that tra
 pip install raveforge
 ```
 
+For development:
+
+```bash
+pip install -e .[dev]
+```
+
 ---
 
-## Quick Start: The Fluent Builder
-
-Here is what it looks like to generate a transaction. Notice how clean the method chaining is compared to standard XML DOM manipulation.
+## Quick Start
 
 ```python
 from raveforge import RaveTransaction, ActionType
 
-# Initialize the transaction envelope
-tx = RaveTransaction(study_oid="Oncology_Phase_II(Prod)")
-
-# Chain the hierarchy context and inject your data
-(
-    tx.subject(subject_key="SUBJ-001", site_oid="SITE-101", action=ActionType.UPSERT)
-      .event("SCREENING")
-      .form("VS")
-      .item_group("VS_GROUP")
-      .item("VSTEST", "Weight")
-      .item("VSORRES", "75")
+tx = (
+    RaveTransaction(study_oid="Oncology_Phase_II_Prod")
+    .subject("SUBJ-001", site_oid="SITE-101", action=ActionType.UPSERT)
+    .event("SCREENING", repeat_key="1")
+    .form("VS", repeat_key="1")
+    .item_group("VS_GROUP", repeat_key="1")
+    .item("VSTEST", "Weight")
+    .item("VSORRES", "75")
 )
 
-# Generate the perfectly namespaced, RWS-compliant XML payload
+xml_payload = tx.build()
+print(tx.build_pretty())
+```
+
+---
+
+## Queries and Specify Values
+
+```python
+from raveforge import (
+    RaveTransaction,
+    QueryStatus,
+    QueryRecipient,
+)
+
+tx = (
+    RaveTransaction("Mediflex_Study")
+    .subject("SUBJ-1001", "SITE-NL-01")
+    .event("VISIT_1")
+    .form("LABS")
+    .item_group("LABS_IG", specified_items_only=True)
+    .item(
+        "LBTEST",
+        value="OTHER",
+        specify="Custom Biomarker Panel",
+        query="Please confirm the local lab method.",
+        query_status=QueryStatus.OPEN,
+        query_recipient=QueryRecipient.SITE_FROM_DM,
+    )
+)
+
 xml_payload = tx.build()
 ```
 
-## The Real Power: Pandas & Bulk Integration
+---
 
-RaveForge really shines when combined with data engineering pipelines or MLOps workflows. If you are reading from a CSV, a database, or a Pandas DataFrame, batching the data is incredibly straightforward.
+## Submitting to RWS
 
 ```python
-import pandas as pd
-import requests
 from raveforge import RaveTransaction
+from raveforge.rws_client import RWSClient
 
-df = pd.read_csv("automated_risk_scores.csv")
-tx = RaveTransaction(study_oid="Project_Mediflex_2026")
-
-for _, row in df.iterrows():
-    # The builder context switches automatically as it loops
-    (
-        tx.subject(row['SubjectKey'], site_oid=row['SiteID'])
-          .event(row['StudyEvent'])
-          .form(row['FormOID'])
-          .item_group(row['ItemGroup'])
-    )
-    
-    # Bulk inject an entire dictionary of items for this specific row
-    tx.batch_items({
-        "RSK_SCORE": row['RiskScore'],
-        "RSK_FLAG": row['HighRiskFlag'],
-        "LBDAT": row['AnalysisDate']
-    })
-
-# Push directly to Medidata RWS
-response = requests.post(
-    "[https://innovate.mdsol.com/RaveWebServices/webservice.aspx?PostODMClinicalData](https://innovate.mdsol.com/RaveWebServices/webservice.aspx?PostODMClinicalData)",
-    data=tx.build(), 
-    headers={'Content-Type': 'text/xml'},
-    auth=('username', 'password')
+tx = (
+    RaveTransaction("Mediflex_Study")
+    .subject("SUBJ-001", "SITE-001")
+    .event("SCREENING")
+    .form("DM")
+    .item_group("DM_IG")
+    .item("AGE", "42")
 )
+
+client = RWSClient(
+    base_url="https://innovate.mdsol.com",
+    username="username",
+    password="password",
+)
+
+response = client.post_odm(tx.build())
+print(response)
 ```
+
+---
+
+## Why use RaveForge?
+
+- It keeps hierarchy handling readable and safe.
+- It fails locally before bad ODM hits the network.
+- It reduces XML-handling boilerplate in clinical integrations.
+- It works well in automation pipelines that generate transactional ODM.
+
+---
+
+## Testing
+
+Run the test suite with:
+
+```bash
+pytest -v
+```
+
+---
 
 ## Contributing
 
-Pull requests are always welcome. If you are adding new RWS features (like manual query generation), please ensure all additions are fully covered by the internal `pytest` validation suite.
+Pull requests are welcome. If you add new builder or RWS features, please include or update pytest coverage.
+
+---
 
 ## License
 
