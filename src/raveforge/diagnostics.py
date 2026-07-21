@@ -192,7 +192,7 @@ class RaveDiagnostics:
                 ),
                 safe_to_retry=False,
             )
-        
+
         if category == "conflict":
             return DiagnosticReport(
                 category=category,
