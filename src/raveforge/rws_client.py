@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 import requests
 from requests.auth import HTTPBasicAuth
 from typing import Optional
@@ -36,11 +37,11 @@ class RWSClient:
             "Accept": "text/xml",
         })
 
-    # ------------------------------------------------------------------
-    # Core request
-    # ------------------------------------------------------------------
-
-    def post_odm(self, odm_bytes: bytes, endpoint: str = "/RaveWebServices/webservice.aspx?PostODMClinicalData") -> str:
+    def post_odm(
+        self,
+        odm_bytes: bytes,
+        endpoint: str = "/RaveWebServices/webservice.aspx?PostODMClinicalData",
+    ) -> str:
         """
         POST an ODM XML payload to Rave RWS.
 
@@ -61,14 +62,12 @@ class RWSClient:
             raise RWSError(f"Request timed out after {self.timeout}s.")
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
-
         return self._handle_response(response)
 
-    # ------------------------------------------------------------------
-    # Read-only diagnostic support
-    # ------------------------------------------------------------------
-
-    def get_studies_raw(self, endpoint: str = "/RaveWebServices/studies") -> str:
+    def get_studies_raw(
+        self,
+        endpoint: str = "/RaveWebServices/studies",
+    ) -> str:
         """
         Retrieve the raw ODM XML listing of studies accessible to the
         authenticated user. Used by RaveDiagnostics for read-only
@@ -84,24 +83,31 @@ class RWSClient:
             raise RWSError(f"Request timed out after {self.timeout}s.")
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
-
         if response.status_code != 200:
             raise RWSError(
                 f"Failed to retrieve study list (HTTP {response.status_code}).",
                 http_status=response.status_code,
             )
-
         return response.text
 
-    # ------------------------------------------------------------------
-    # Response handling
-    # ------------------------------------------------------------------
+    def ping(self) -> bool:
+        """
+        Verify RWS connectivity by calling the version endpoint.
+
+        Returns True if the server responds (including 401 — reachable
+        but not yet authenticated). Returns False on any network failure.
+        """
+        try:
+            url = f"{self.base_url}/RaveWebServices/webservice.aspx?GetVersion"
+            r = self._session.get(url, timeout=self.timeout)
+            return r.status_code in (200, 401)
+        except requests.exceptions.RequestException:
+            return False
 
     def _handle_response(self, response: requests.Response) -> str:
         body = response.text
 
         if response.status_code == 200:
-            # RWS can return HTTP 200 but contain an error in the XML body
             if "<Response ReferenceNumber" in body and "Error" in body:
                 rws_code = self._extract_rws_code(body)
                 raise RWSError(
@@ -111,7 +117,6 @@ class RWSClient:
                 )
             return body
 
-        # Map common RWS HTTP error codes to meaningful messages
         rws_messages = {
             400: "Bad Request — malformed ODM XML.",
             401: "Unauthorised — check credentials.",
@@ -125,8 +130,6 @@ class RWSClient:
 
     @staticmethod
     def _extract_rws_code(body: str) -> Optional[str]:
-        """Best-effort extraction of RWS error code from response XML."""
-        import re
         match = re.search(r'ErrorClientResponseMessage="([^"]+)"', body)
         if match:
             return match.group(1)
@@ -134,16 +137,3 @@ class RWSClient:
         if match:
             return match.group(1)
         return None
-
-    # ------------------------------------------------------------------
-    # Convenience helpers
-    # ------------------------------------------------------------------
-
-    def ping(self) -> bool:
-        """Check RWS connectivity. Returns True if reachable."""
-        try:
-            url = f"{self.base_url}/RaveWebServices/webservice.aspx?GetMetadataXML"
-            r = self._session.get(url, timeout=self.timeout)
-            return r.status_code in (200, 401)  # 401 = reachable but not authorised
-        except requests.exceptions.RequestException:
-            return False

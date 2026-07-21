@@ -3,21 +3,24 @@ import difflib
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .exceptions import RWSError
 
+if TYPE_CHECKING:
+    from .core import RaveTransaction
+
 ODM_NS = "http://www.cdisc.org/ns/odm/v1.3"
+_MATCH_THRESHOLD = 0.6
 
 
 @dataclass
 class DiagnosticReport:
     """
-    Structured, machine-readable explanation of an RWS failure.
+    Structured result of an RWS submission failure analysis.
 
-    This is intentionally NOT a free-text guess. Every field is either
-    a fact pulled from RWS or a clearly-labeled suggestion. RaveForge
-    never applies these suggestions automatically.
+    Every field is either a fact retrieved from RWS or a clearly-labelled
+    suggestion. RaveForge never applies suggestions automatically.
     """
 
     category: str
@@ -59,14 +62,13 @@ class RaveDiagnostics:
     """
     Read-only diagnostic layer for RaveForge.
 
-    RaveDiagnostics interprets RWS submission failures and returns
-    evidence-based suggestions. It never modifies the caller's
-    transaction or automatically selects a study, site, or subject.
-    All lookups are read-only RWS GET calls, scoped to the minimum
-    information needed to explain the failure.
+    Interprets RWS submission failures and returns evidence-based
+    suggestions via targeted, read-only RWS GET calls. Never modifies
+    the caller's transaction or automatically selects a study, site,
+    or subject on their behalf.
     """
 
-    def __init__(self, client) -> None:
+    def __init__(self, client: Any) -> None:
         self._client = client
 
     # ------------------------------------------------------------------
@@ -90,30 +92,20 @@ class RaveDiagnostics:
             root = ET.fromstring(body)
         except ET.ParseError:
             return studies
-
         for study in root.iter(f"{{{ODM_NS}}}Study"):
             oid = study.attrib.get("OID", "")
             name_node = study.find(f"{{{ODM_NS}}}GlobalVariables/{{{ODM_NS}}}StudyName")
             name = name_node.text if name_node is not None and name_node.text else oid
             studies.append({"oid": oid, "name": name})
-
         return studies
 
     # ------------------------------------------------------------------
-    # Matching helpers
+    # Matching
     # ------------------------------------------------------------------
 
     @staticmethod
     def _normalize(value: str) -> str:
-        """
-        Normalize an identifier for comparison by lowercasing and removing
-        all non-alphanumeric characters.
-
-        Examples:
-            "Mediflex (Dev)" -> "mediflexdev"
-            "mediflex dev"   -> "mediflexdev"
-            "Cardio_Study-01" -> "cardiostudy01"
-        """
+        """Lowercase and strip all non-alphanumeric characters for comparison."""
         return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
     def _find_close_matches(
@@ -121,13 +113,13 @@ class RaveDiagnostics:
         target: str,
         candidates: List[str],
         limit: int = 3,
-        threshold: float = 0.6,
+        threshold: float = _MATCH_THRESHOLD,
     ) -> List[Dict[str, Any]]:
         """
-        Find close matches for `target` within `candidates`.
+        Return up to `limit` candidates that are close to `target`.
 
-        Uses normalized exact matching first, then falls back to sequence
-        similarity scoring against normalized values.
+        Normalised exact matches score 1.0. All other matches are scored
+        using SequenceMatcher and must exceed `threshold` to be included.
         """
         if not target or not candidates:
             return []
@@ -137,11 +129,9 @@ class RaveDiagnostics:
 
         for candidate in candidates:
             normalized_candidate = self._normalize(candidate)
-
             if normalized_candidate == normalized_target:
                 matches.append({"value": candidate, "similarity": 1.0})
                 continue
-
             ratio = difflib.SequenceMatcher(None, normalized_target, normalized_candidate).ratio()
             if ratio >= threshold:
                 matches.append({"value": candidate, "similarity": round(ratio, 2)})
@@ -156,12 +146,10 @@ class RaveDiagnostics:
     @staticmethod
     def categorize_error(error: RWSError) -> str:
         """
-        Categorize an RWSError into a diagnostic bucket based on HTTP
-        status and message content.
+        Map an RWSError to a diagnostic category.
 
-        Ordering matters: check the most specific entity names first
-        (subject -> site -> study) to avoid substring collisions like:
-        'Subject invalid for this site'
+        Entity keywords are checked most-specific-first (subject before
+        site before study) to avoid substring false matches.
         """
         status = error.http_status
         message = str(error).lower()
@@ -193,11 +181,18 @@ class RaveDiagnostics:
     def explain_submission_failure(
         self,
         error: RWSError,
-        transaction: Optional[Any] = None,
+        transaction: Optional["RaveTransaction"] = None,
         include_subject_location: bool = False,
     ) -> DiagnosticReport:
         """
         Build a DiagnosticReport for a failed RWS submission.
+
+        Args:
+            error:                    The RWSError raised by RWSClient.post_odm().
+            transaction:              The RaveTransaction that was being submitted.
+                                      When provided, enables study-level lookup.
+            include_subject_location: Reserved for a future phase; has no effect
+                                      in Phase 1.
         """
         category = self.categorize_error(error)
 
@@ -248,7 +243,7 @@ class RaveDiagnostics:
         )
 
     # ------------------------------------------------------------------
-    # Specific diagnostics
+    # Study-level diagnosis
     # ------------------------------------------------------------------
 
     def _diagnose_study_not_found(self, requested_study_oid: str) -> DiagnosticReport:
@@ -268,9 +263,8 @@ class RaveDiagnostics:
             )
 
         study_oids = [s["oid"] for s in studies]
-        exact_match = requested_study_oid in study_oids
 
-        if exact_match:
+        if requested_study_oid in study_oids:
             return DiagnosticReport(
                 category="study_not_found",
                 severity="warning",

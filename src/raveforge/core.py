@@ -11,11 +11,13 @@ from .enums import ActionType, QueryStatus, QueryRecipient
 MDSOL_NS = "http://www.mdsol.com/ns/odm/metadata"
 ODM_NS = "http://www.cdisc.org/ns/odm/v1.3"
 
+_DEFAULT_REPEAT_KEY = "1"
+
 
 class RaveTransaction:
     """
-    RaveForge Core: Handles CDISC ODM generation with specific
-    hooks for Medidata RWS extensions.
+    Builds a CDISC ODM transactional payload for submission to Medidata Rave
+    Web Services (RWS), including Medidata-specific ODM extensions.
 
     Supports a fluent/chained builder API:
 
@@ -42,7 +44,6 @@ class RaveTransaction:
         self._current_form: Optional[str] = None
         self._current_group: Optional[str] = None
 
-        # Register namespaces for clean serialisation
         ET.register_namespace("", ODM_NS)
         ET.register_namespace("mdsol", MDSOL_NS)
 
@@ -53,8 +54,7 @@ class RaveTransaction:
     def __enter__(self) -> RaveTransaction:
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        # Does not suppress exceptions; just allows `with` syntax.
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Optional[bool]:
         return None
 
     # ------------------------------------------------------------------
@@ -84,18 +84,18 @@ class RaveTransaction:
     def event(
         self,
         event_oid: str,
-        repeat_key: Optional[str] = "1",
+        repeat_key: Optional[str] = _DEFAULT_REPEAT_KEY,
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
         """Add or switch to a study event context."""
         if not self._current_subject:
             raise HierarchyError("Subject context required before calling event().")
         events = self._subjects[self._current_subject]["Events"]
-        event_key = f"{event_oid}_{repeat_key or '1'}"
+        event_key = f"{event_oid}_{repeat_key or _DEFAULT_REPEAT_KEY}"
         if event_key not in events:
             events[event_key] = {
                 "OID": event_oid,
-                "RepeatKey": repeat_key,
+                "RepeatKey": repeat_key or _DEFAULT_REPEAT_KEY,
                 "Action": action.value if action else None,
                 "Forms": {},
             }
@@ -107,18 +107,18 @@ class RaveTransaction:
     def form(
         self,
         form_oid: str,
-        repeat_key: Optional[str] = "1",
+        repeat_key: Optional[str] = _DEFAULT_REPEAT_KEY,
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
         """Add or switch to a form context."""
         if not self._current_event:
             raise HierarchyError("Event context required before calling form().")
         forms = self._subjects[self._current_subject]["Events"][self._current_event]["Forms"]
-        form_key = f"{form_oid}_{repeat_key or '1'}"
+        form_key = f"{form_oid}_{repeat_key or _DEFAULT_REPEAT_KEY}"
         if form_key not in forms:
             forms[form_key] = {
                 "OID": form_oid,
-                "RepeatKey": repeat_key,
+                "RepeatKey": repeat_key or _DEFAULT_REPEAT_KEY,
                 "Action": action.value if action else None,
                 "ItemGroups": {},
             }
@@ -167,7 +167,7 @@ class RaveTransaction:
         Args:
             item_oid:        The ODM ItemOID.
             value:           The data value to submit.
-            specify:         Free-text "Specify" value for coded items with an open other.
+            specify:         Free-text value for coded items with an open-other response.
             query:           Query text to attach as an mdsol:Query element.
             query_status:    Status of the query (default: Open).
             query_recipient: Recipient of the query (default: Site from System).
@@ -201,13 +201,13 @@ class RaveTransaction:
         return self
 
     def reset(self) -> RaveTransaction:
-        """Fully reset the transaction, clearing all subjects and context."""
+        """Fully reset the transaction, clearing all subjects and regenerating the file identity."""
         self._subjects = {}
         self.file_oid = str(uuid.uuid4())
         return self.reset_context()
 
     # ------------------------------------------------------------------
-    # Build methods
+    # Build
     # ------------------------------------------------------------------
 
     def build(self, encoding: str = "UTF-8") -> bytes:
@@ -216,7 +216,7 @@ class RaveTransaction:
             "xmlns": ODM_NS,
             "FileType": "Transactional",
             "FileOID": self.file_oid,
-            "CreationDateTime": datetime.datetime.utcnow().isoformat() + "Z",
+            "CreationDateTime": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "ODMVersion": "1.3",
         })
 
@@ -226,7 +226,7 @@ class RaveTransaction:
         })
 
         for subj_key, subj_data in self._subjects.items():
-            subj_attribs = {"SubjectKey": subj_key}
+            subj_attribs: Dict[str, str] = {"SubjectKey": subj_key}
             if subj_data["Action"]:
                 subj_attribs["TransactionType"] = subj_data["Action"]
 
@@ -234,27 +234,26 @@ class RaveTransaction:
             ET.SubElement(subj_node, "SiteRef", {"LocationOID": subj_data["SiteOID"]})
 
             for event_data in subj_data["Events"].values():
-                event_attribs = {
+                event_attribs: Dict[str, str] = {
                     "StudyEventOID": event_data["OID"],
-                    "StudyEventRepeatKey": event_data["RepeatKey"] or "1",
+                    "StudyEventRepeatKey": event_data["RepeatKey"],
                 }
                 if event_data["Action"]:
                     event_attribs["TransactionType"] = event_data["Action"]
                 event_node = ET.SubElement(subj_node, "StudyEventData", event_attribs)
 
                 for form_data in event_data["Forms"].values():
-                    form_attribs = {
+                    form_attribs: Dict[str, str] = {
                         "FormOID": form_data["OID"],
-                        "FormRepeatKey": form_data["RepeatKey"] or "1",
+                        "FormRepeatKey": form_data["RepeatKey"],
                     }
                     if form_data["Action"]:
                         form_attribs["TransactionType"] = form_data["Action"]
                     form_node = ET.SubElement(event_node, "FormData", form_attribs)
 
                     for group_data in form_data["ItemGroups"].values():
-                        group_attribs = {"ItemGroupOID": group_data["OID"]}
-
-                        if group_data["RepeatKey"]:
+                        group_attribs: Dict[str, str] = {"ItemGroupOID": group_data["OID"]}
+                        if group_data["RepeatKey"] is not None:
                             group_attribs["ItemGroupRepeatKey"] = group_data["RepeatKey"]
                         if group_data["Action"]:
                             group_attribs["TransactionType"] = group_data["Action"]
@@ -264,7 +263,7 @@ class RaveTransaction:
                         group_node = ET.SubElement(form_node, "ItemGroupData", group_attribs)
 
                         for item_oid, item_dict in group_data["Items"].items():
-                            item_attribs = {"ItemOID": item_oid}
+                            item_attribs: Dict[str, str] = {"ItemOID": item_oid}
                             if item_dict["Value"] is not None:
                                 item_attribs["Value"] = str(item_dict["Value"])
                             if item_dict["Specify"] is not None:
@@ -285,10 +284,12 @@ class RaveTransaction:
 
         return ET.tostring(root, encoding=encoding, xml_declaration=True)
 
-    def build_pretty(self, encoding: str = "UTF-8") -> str:
+    def build_pretty(self) -> str:
         """
         Serialise to a human-readable, indented XML string.
-        Useful for debugging and logging.
+
+        Returns a Unicode string without an encoding declaration.
+        Intended for debugging and logging; use build() for transmission.
         """
         raw = self.build(encoding="unicode")
         parsed = minidom.parseString(raw)
