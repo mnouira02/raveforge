@@ -1,9 +1,10 @@
 from unittest.mock import Mock, patch
-import requests
-import pytest
 
-from raveforge.rws_client import RWSClient
+import pytest
+import requests
+
 from raveforge.exceptions import RWSError
+from raveforge.rws_client import RWSClient
 
 
 def make_mock_response(status_code=200, text="<Response>Success</Response>"):
@@ -84,7 +85,10 @@ def test_post_odm_success_with_custom_endpoint(mock_post):
     mock_post.assert_called_once()
 
     args, kwargs = mock_post.call_args
-    assert args[0] == "https://innovate.mdsol.com/RaveWebServices/custom.aspx?PostODMClinicalData"
+    assert args[0] == (
+        "https://innovate.mdsol.com"
+        "/RaveWebServices/custom.aspx?PostODMClinicalData"
+    )
     assert kwargs["data"] == odm_bytes
 
 
@@ -234,7 +238,7 @@ def test_post_odm_raises_on_unexpected_http_status(mock_post):
 
 @patch("requests.Session.post")
 def test_post_odm_raises_when_rws_error_is_embedded_in_200(mock_post):
-    """Validates a 200 response containing IsTransactionSuccessful=false is treated as failure."""
+    """Validates a 200 with IsTransactionSuccessful=false is treated as failure."""
     mock_post.return_value = make_mock_response(
         status_code=200,
         text=(
@@ -262,7 +266,7 @@ def test_post_odm_raises_when_rws_error_is_embedded_in_200(mock_post):
 
 @patch("requests.Session.post")
 def test_post_odm_success_body_containing_word_error_does_not_raise(mock_post):
-    """Validates that a 200 body containing the word 'Error' in a non-failure context does not raise."""
+    """Validates a 200 body with 'Error' in a non-failure context does not raise."""
     mock_post.return_value = make_mock_response(
         status_code=200,
         text="<Response ReferenceNumber=\"abc\">No errors reported.</Response>",
@@ -365,7 +369,7 @@ def test_ping_returns_true_on_200(mock_get):
 
 @patch("requests.Session.get")
 def test_ping_returns_true_on_401(mock_get):
-    """Validates ping still returns True when endpoint is reachable but credentials are not yet validated."""
+    """Validates ping returns True when reachable but credentials not yet validated."""
     mock_get.return_value = make_mock_response(status_code=401, text="Unauthorized")
 
     client = RWSClient(

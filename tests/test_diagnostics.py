@@ -1,27 +1,30 @@
 from unittest.mock import Mock
-import pytest
 
-from raveforge import RaveTransaction, RaveDiagnostics, DiagnosticReport, RWSError
+from raveforge import DiagnosticReport, RaveDiagnostics, RaveTransaction, RWSError
 
 
-SAMPLE_STUDIES_XML = """<?xml version="1.0" encoding="UTF-8"?>
-<ODM xmlns="http://www.cdisc.org/ns/odm/v1.3" FileType="Snapshot" FileOID="abc" CreationDateTime="2026-01-01T00:00:00" ODMVersion="1.3">
-  <Study OID="Mediflex (Dev)">
-    <GlobalVariables>
-      <StudyName>Mediflex (Dev)</StudyName>
-    </GlobalVariables>
-  </Study>
-  <Study OID="Oncology_Phase_II_Prod">
-    <GlobalVariables>
-      <StudyName>Oncology Phase II (Prod)</StudyName>
-    </GlobalVariables>
-  </Study>
-  <Study OID="Cardio_Study_01">
-    <GlobalVariables>
-      <StudyName>Cardio Study 01</StudyName>
-    </GlobalVariables>
-  </Study>
-</ODM>"""
+SAMPLE_STUDIES_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<ODM xmlns="http://www.cdisc.org/ns/odm/v1.3"'
+    ' FileType="Snapshot" FileOID="abc"'
+    ' CreationDateTime="2026-01-01T00:00:00" ODMVersion="1.3">\n'
+    '  <Study OID="Mediflex (Dev)">\n'
+    '    <GlobalVariables>\n'
+    '      <StudyName>Mediflex (Dev)</StudyName>\n'
+    '    </GlobalVariables>\n'
+    '  </Study>\n'
+    '  <Study OID="Oncology_Phase_II_Prod">\n'
+    '    <GlobalVariables>\n'
+    '      <StudyName>Oncology Phase II (Prod)</StudyName>\n'
+    '    </GlobalVariables>\n'
+    '  </Study>\n'
+    '  <Study OID="Cardio_Study_01">\n'
+    '    <GlobalVariables>\n'
+    '      <StudyName>Cardio Study 01</StudyName>\n'
+    '    </GlobalVariables>\n'
+    '  </Study>\n'
+    '</ODM>'
+)
 
 
 def make_client_stub(studies_xml: str = SAMPLE_STUDIES_XML):
@@ -109,7 +112,9 @@ def test_categorize_error_unknown_defaults_safely():
 
 def test_find_close_matches_exact_normalized_match():
     diagnostics = RaveDiagnostics(make_client_stub())
-    matches = diagnostics._find_close_matches("mediflex dev", ["Mediflex (Dev)", "Cardio_Study_01"])
+    matches = diagnostics._find_close_matches(
+        "mediflex dev", ["Mediflex (Dev)", "Cardio_Study_01"]
+    )
 
     assert matches[0]["value"] == "Mediflex (Dev)"
     assert matches[0]["similarity"] == 1.0
@@ -117,7 +122,9 @@ def test_find_close_matches_exact_normalized_match():
 
 def test_find_close_matches_returns_similar_candidates():
     diagnostics = RaveDiagnostics(make_client_stub())
-    matches = diagnostics._find_close_matches("Mediflex Dev", ["Mediflex (Dev)", "Cardio_Study_01"])
+    matches = diagnostics._find_close_matches(
+        "Mediflex Dev", ["Mediflex (Dev)", "Cardio_Study_01"]
+    )
 
     assert len(matches) >= 1
     assert matches[0]["value"] == "Mediflex (Dev)"
@@ -126,7 +133,9 @@ def test_find_close_matches_returns_similar_candidates():
 
 def test_find_close_matches_returns_empty_for_unrelated_target():
     diagnostics = RaveDiagnostics(make_client_stub())
-    matches = diagnostics._find_close_matches("Completely_Different_Name", ["Cardio_Study_01"])
+    matches = diagnostics._find_close_matches(
+        "Completely_Different_Name", ["Cardio_Study_01"]
+    )
 
     assert matches == []
 

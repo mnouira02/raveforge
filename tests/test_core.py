@@ -1,12 +1,13 @@
 import xml.etree.ElementTree as ET
+
 import pytest
 
 from raveforge import (
-    RaveTransaction,
     ActionType,
-    QueryStatus,
-    QueryRecipient,
     HierarchyError,
+    QueryRecipient,
+    QueryStatus,
+    RaveTransaction,
 )
 
 
@@ -163,7 +164,9 @@ def test_item_with_specify_value():
     assert item is not None
     assert item.attrib["ItemOID"] == "CMTRT"
     assert item.attrib["Value"] == "OTHER"
-    assert item.attrib[qname(MDSOL_NS, "SpecifyValue")] == "Investigational Vitamin Blend"
+    assert (
+        item.attrib[qname(MDSOL_NS, "SpecifyValue")] == "Investigational Vitamin Blend"
+    )
 
 
 def test_item_with_query_metadata():
@@ -187,7 +190,10 @@ def test_item_with_query_metadata():
     query_node = root.find(f".//{qname(MDSOL_NS, 'Query')}")
 
     assert query_node is not None
-    assert query_node.attrib["Value"] == "Please confirm whether this was measured orally."
+    assert (
+        query_node.attrib["Value"]
+        == "Please confirm whether this was measured orally."
+    )
     assert query_node.attrib["Status"] == "Open"
     assert query_node.attrib["Recipient"] == "Site from DM"
 
@@ -195,7 +201,13 @@ def test_item_with_query_metadata():
 def test_context_manager_support():
     """Validates the transaction can be used with a context manager."""
     with RaveTransaction("Test_Study") as tx:
-        tx.subject("S-1", "Site-1").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1")
+        (
+            tx.subject("S-1", "Site-1")
+            .event("E-1")
+            .form("F-1")
+            .item_group("IG-1")
+            .item("I-1", "V-1")
+        )
 
     root = ET.fromstring(tx.build())
     item = root.find(f".//{qname(ODM_NS, 'ItemData')}")
@@ -208,7 +220,13 @@ def test_context_manager_support():
 def test_subject_revisit_updates_site_oid():
     """Validates that calling subject() again with a new SiteOID updates it correctly."""
     tx = RaveTransaction("Test_Study")
-    tx.subject("S-1", "SITE-A").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1")
+    (
+        tx.subject("S-1", "SITE-A")
+        .event("E-1")
+        .form("F-1")
+        .item_group("IG-1")
+        .item("I-1", "V-1")
+    )
     tx.subject("S-1", "SITE-B")
 
     root = ET.fromstring(tx.build())
@@ -221,7 +239,13 @@ def test_subject_revisit_updates_site_oid():
 def test_subject_revisit_preserves_events():
     """Validates that revisiting a subject does not discard its accumulated events."""
     tx = RaveTransaction("Test_Study")
-    tx.subject("S-1", "SITE-A").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1")
+    (
+        tx.subject("S-1", "SITE-A")
+        .event("E-1")
+        .form("F-1")
+        .item_group("IG-1")
+        .item("I-1", "V-1")
+    )
     tx.subject("S-1", "SITE-B")
 
     root = ET.fromstring(tx.build())
@@ -239,8 +263,9 @@ def test_subject_revisit_preserves_events():
 def test_hierarchy_enforcement_event_without_subject():
     """Ensures developers cannot define an event without subject context."""
     tx = RaveTransaction(study_oid="Test_Study")
+    match = "Subject context required before calling event\\(\\)."
 
-    with pytest.raises(HierarchyError, match="Subject context required before calling event\\(\\)."):
+    with pytest.raises(HierarchyError, match=match):
         tx.event("SCREENING")
 
 
@@ -248,8 +273,9 @@ def test_hierarchy_enforcement_form_without_event():
     """Ensures developers cannot define a form without event context."""
     tx = RaveTransaction(study_oid="Test_Study")
     tx.subject("S-1", "Site-1")
+    match = "Event context required before calling form\\(\\)."
 
-    with pytest.raises(HierarchyError, match="Event context required before calling form\\(\\)."):
+    with pytest.raises(HierarchyError, match=match):
         tx.form("F-1")
 
 
@@ -257,8 +283,9 @@ def test_hierarchy_enforcement_item_group_without_form():
     """Ensures developers cannot define an item group without form context."""
     tx = RaveTransaction(study_oid="Test_Study")
     tx.subject("S-1", "Site-1").event("E-1")
+    match = "Form context required before calling item_group\\(\\)."
 
-    with pytest.raises(HierarchyError, match="Form context required before calling item_group\\(\\)."):
+    with pytest.raises(HierarchyError, match=match):
         tx.item_group("IG-1")
 
 
@@ -266,8 +293,9 @@ def test_hierarchy_enforcement_item_without_group():
     """Ensures data items cannot be added without an active item group."""
     tx = RaveTransaction(study_oid="Test_Study")
     tx.subject("S-1", "Site-1").event("E-1").form("F-1")
+    match = "ItemGroup context required before calling item\\(\\)."
 
-    with pytest.raises(HierarchyError, match="ItemGroup context required before calling item\\(\\)."):
+    with pytest.raises(HierarchyError, match=match):
         tx.item("VITAL", "120")
 
 
@@ -279,7 +307,13 @@ def test_hierarchy_enforcement_item_without_group():
 def test_reset_context_clears_only_current_pointers():
     """Validates reset_context clears active pointers but keeps accumulated data."""
     tx = RaveTransaction("Test_Study")
-    tx.subject("S-1", "Site-1").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1")
+    (
+        tx.subject("S-1", "Site-1")
+        .event("E-1")
+        .form("F-1")
+        .item_group("IG-1")
+        .item("I-1", "V-1")
+    )
 
     tx.reset_context()
 
@@ -290,7 +324,8 @@ def test_reset_context_clears_only_current_pointers():
     assert item.attrib["ItemOID"] == "I-1"
     assert item.attrib["Value"] == "V-1"
 
-    with pytest.raises(HierarchyError, match="Subject context required before calling event\\(\\)."):
+    match = "Subject context required before calling event\\(\\)."
+    with pytest.raises(HierarchyError, match=match):
         tx.event("E-2")
 
 
@@ -299,7 +334,13 @@ def test_reset_clears_all_data_and_generates_new_file_oid():
     tx = RaveTransaction("Test_Study")
     original_file_oid = tx.file_oid
 
-    tx.subject("S-1", "Site-1").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1")
+    (
+        tx.subject("S-1", "Site-1")
+        .event("E-1")
+        .form("F-1")
+        .item_group("IG-1")
+        .item("I-1", "V-1")
+    )
     tx.reset()
 
     root = ET.fromstring(tx.build())
