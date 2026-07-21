@@ -75,6 +75,10 @@ class RaveDiagnostics:
     def __init__(self, client: Any) -> None:
         self._client = client
 
+    # ------------------------------------------------------------------
+    # Study helpers
+    # ------------------------------------------------------------------
+
     def get_studies(self) -> List[Dict[str, str]]:
         """
         Retrieve the list of studies accessible to the authenticated user.
@@ -104,6 +108,46 @@ class RaveDiagnostics:
             )
             studies.append({"oid": oid, "name": name})
         return studies
+
+    # ------------------------------------------------------------------
+    # Site helpers
+    # ------------------------------------------------------------------
+
+    def get_sites(self, study_oid: str) -> List[str]:
+        """
+        Retrieve the list of site OIDs for a given study.
+
+        Delegates to ``client.get_sites_raw(study_oid)`` and parses
+        LocationOID attributes from the returned ODM XML.
+
+        Returns:
+            A list of site OID strings.
+        """
+        body = self._client.get_sites_raw(study_oid)
+        return self._parse_site_oids(body)
+
+    @staticmethod
+    def _parse_site_oids(body: str) -> List[str]:
+        site_oids: List[str] = []
+        try:
+            root = ET.fromstring(body)
+        except ET.ParseError:
+            return site_oids
+        # RWS returns sites as <Location OID="..." /> elements
+        for loc in root.iter("Location"):
+            oid = loc.attrib.get("OID", "")
+            if oid:
+                site_oids.append(oid)
+        # Also handle ODM-namespaced Location elements
+        for loc in root.iter(f"{{{ODM_NS}}}Location"):
+            oid = loc.attrib.get("OID", "")
+            if oid and oid not in site_oids:
+                site_oids.append(oid)
+        return site_oids
+
+    # ------------------------------------------------------------------
+    # Shared utilities
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _normalize(value: str) -> str:
@@ -136,6 +180,10 @@ class RaveDiagnostics:
         matches.sort(key=lambda m: m["similarity"], reverse=True)
         return matches[:limit]
 
+    # ------------------------------------------------------------------
+    # Error categorisation
+    # ------------------------------------------------------------------
+
     @staticmethod
     def categorize_error(error: RWSError) -> str:
         status = error.http_status
@@ -160,6 +208,10 @@ class RaveDiagnostics:
             return "not_found"
 
         return "unknown"
+
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
 
     def explain_submission_failure(
         self,
@@ -200,7 +252,7 @@ class RaveDiagnostics:
                 evidence={"http_status": error.http_status},
                 recommendation=(
                     "RWS reported a data conflict. "
-                "Check for duplicate subject keys or concurrent edits."
+                    "Check for duplicate subject keys or concurrent edits."
                 ),
                 safe_to_retry=False,
             )
@@ -220,6 +272,18 @@ class RaveDiagnostics:
         if category == "study_not_found" and transaction is not None:
             return self._diagnose_study_not_found(transaction.study_oid)
 
+        if category == "site_not_found" and transaction is not None:
+            return self._diagnose_site_not_found(
+                transaction.study_oid,
+                self._extract_site_oid(transaction),
+            )
+
+        if category == "subject_not_found" and transaction is not None:
+            return self._diagnose_subject_not_found(
+                transaction.study_oid,
+                self._extract_subject_keys(transaction),
+            )
+
         return DiagnosticReport(
             category=category if category != "unknown" else "unrecognized_error",
             severity="error",
@@ -233,6 +297,10 @@ class RaveDiagnostics:
             ),
             safe_to_retry=False,
         )
+
+    # ------------------------------------------------------------------
+    # Private diagnostic methods
+    # ------------------------------------------------------------------
 
     def _diagnose_study_not_found(self, requested_study_oid: str) -> DiagnosticReport:
         try:
@@ -287,3 +355,116 @@ class RaveDiagnostics:
             ),
             safe_to_retry=False,
         )
+
+    def _diagnose_site_not_found(
+        self,
+        study_oid: str,
+        requested_site_oid: Optional[str],
+    ) -> DiagnosticReport:
+        if not requested_site_oid:
+            return DiagnosticReport(
+                category="site_not_found",
+                severity="error",
+                evidence={"study_oid": study_oid},
+                recommendation=(
+                    "Could not extract a SiteOID from the transaction. "
+                    "Ensure every subject carries a valid LocationOID."
+                ),
+                safe_to_retry=False,
+            )
+
+        try:
+            site_oids = self.get_sites(study_oid)
+        except Exception:
+            return DiagnosticReport(
+                category="site_not_found",
+                severity="error",
+                requested={"site_oid": requested_site_oid, "study_oid": study_oid},
+                evidence={"accessible_site_count": None},
+                recommendation=(
+                    "Could not retrieve the site list for this study. "
+                    "Verify the SiteOID matches the exact configuration in Rave."
+                ),
+                safe_to_retry=False,
+            )
+
+        if requested_site_oid in site_oids:
+            return DiagnosticReport(
+                category="site_not_found",
+                severity="warning",
+                requested={"site_oid": requested_site_oid, "study_oid": study_oid},
+                evidence={
+                    "accessible_site_count": len(site_oids),
+                    "close_matches": [
+                        {"value": requested_site_oid, "similarity": 1.0}
+                    ],
+                },
+                recommendation=(
+                    "The SiteOID exists in the study, so the failure may be caused "
+                    "by subject-level permissions or environment mismatch."
+                ),
+                safe_to_retry=False,
+            )
+
+        suggestions = self._find_close_matches(requested_site_oid, site_oids)
+
+        return DiagnosticReport(
+            category="site_not_found",
+            severity="error",
+            requested={"site_oid": requested_site_oid, "study_oid": study_oid},
+            evidence={
+                "accessible_site_count": len(site_oids),
+                "close_matches": suggestions,
+            },
+            recommendation=(
+                "Confirm the SiteOID matches the exact LocationOID configured "
+                "in Rave for this study. No payload was changed automatically."
+            ),
+            safe_to_retry=False,
+        )
+
+    def _diagnose_subject_not_found(
+        self,
+        study_oid: str,
+        subject_keys: List[str],
+    ) -> DiagnosticReport:
+        """
+        Provide guidance when RWS reports a subject-not-found error.
+
+        RWS does not expose a subject list endpoint, so this method cannot
+        perform fuzzy matching. Instead it returns the subject key(s) from
+        the transaction and actionable advice.
+        """
+        return DiagnosticReport(
+            category="subject_not_found",
+            severity="error",
+            requested={"study_oid": study_oid, "subject_keys": subject_keys},
+            evidence={
+                "subject_count_in_transaction": len(subject_keys),
+            },
+            recommendation=(
+                "Verify that the SubjectKey(s) listed above exist in the target "
+                "study and site. RWS does not expose a subject list endpoint, so "
+                "no fuzzy matching is possible. Check for leading/trailing "
+                "whitespace, case differences, or environment mismatches."
+            ),
+            safe_to_retry=False,
+        )
+
+    # ------------------------------------------------------------------
+    # Transaction inspection helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_site_oid(transaction: "RaveTransaction") -> Optional[str]:
+        """Return the first SiteOID found across all subjects, or None."""
+        for subj_data in transaction._subjects.values():
+            site = subj_data.get("SiteOID")
+            if site:
+                return site
+        return None
+
+    @staticmethod
+    def _extract_subject_keys(transaction: "RaveTransaction") -> List[str]:
+        """Return all subject keys present in the transaction."""
+        return list(transaction._subjects.keys())
