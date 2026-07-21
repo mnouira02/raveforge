@@ -3,7 +3,7 @@ import datetime
 import uuid
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from .exceptions import HierarchyError
 from .enums import ActionType, QueryStatus, QueryRecipient
@@ -30,7 +30,7 @@ class RaveTransaction:
     Builds a CDISC ODM transactional payload for submission to Medidata Rave
     Web Services (RWS), including Medidata-specific ODM extensions.
 
-    Supports a fluent/chained builder API:
+    Supports a fluent/chained builder API::
 
         tx = RaveTransaction("MY_STUDY")
         xml_bytes = (
@@ -41,6 +41,12 @@ class RaveTransaction:
               .item("AGE", value="34")
               .build()
         )
+
+    Pre-build validation::
+
+        from raveforge import validate
+        validate(tx)           # raises ValidationError if the transaction is malformed
+        xml_bytes = tx.build() # safe to call after validation passes
     """
 
     def __init__(self, study_oid: str, metadata_version_oid: str = "1") -> None:

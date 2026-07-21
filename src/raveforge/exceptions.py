@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional
+from typing import List, Optional
 
 
 class RaveForgeError(Exception):
@@ -11,7 +11,19 @@ class HierarchyError(RaveForgeError):
 
 
 class ValidationError(RaveForgeError):
-    """Raised when the ODM transaction fails pre-build validation."""
+    """
+    Raised when the ODM transaction fails pre-build validation.
+
+    Attributes:
+        issues: The list of :class:`~raveforge.validator.ValidationIssue`
+                objects that triggered this exception.  Empty when the
+                exception is constructed from a raw message string rather than
+                via the validator.
+    """
+
+    def __init__(self, message: str, issues: Optional[List] = None) -> None:
+        super().__init__(message)
+        self.issues: List = issues if issues is not None else []
 
 
 class RWSError(RaveForgeError):
