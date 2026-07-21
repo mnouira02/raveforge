@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 import re
+from typing import Optional
+
 import requests
 from requests.auth import HTTPBasicAuth
-from typing import Optional
 
 from .exceptions import RWSError
 
@@ -71,8 +73,7 @@ class RWSClient:
     ) -> str:
         """
         Retrieve the raw ODM XML listing of studies accessible to the
-        authenticated user. Used by :class:`RaveDiagnostics` for read-only
-        study-name comparison. Does not modify any data.
+        authenticated user.
 
         Raises:
             RWSError: On HTTP errors or network failures.
@@ -128,7 +129,9 @@ class RWSClient:
             404: "Not Found — check study OID or endpoint URL.",
             409: "Conflict — transaction violates study configuration.",
         }
-        message = rws_messages.get(response.status_code, f"Unexpected HTTP {response.status_code}.")
+        message = rws_messages.get(
+            response.status_code, f"Unexpected HTTP {response.status_code}."
+        )
         rws_code = self._extract_rws_code(body)
         raise RWSError(message, rws_code=rws_code, http_status=response.status_code)
 
@@ -137,7 +140,7 @@ class RWSClient:
         match = re.search(r'ErrorClientResponseMessage="([^"]+)"', body)
         if match:
             return match.group(1)
-        match = re.search(r'<ErrorDescription>(.*?)</ErrorDescription>', body)
+        match = re.search(r"<ErrorDescription>(.*?)</ErrorDescription>", body)
         if match:
             return match.group(1)
         return None
