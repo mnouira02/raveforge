@@ -257,7 +257,7 @@ class RaveDiagnostics:
                 category="study_not_found",
                 severity="warning",
                 requested={"study_oid": requested_study_oid},
-                evidence={"accessible_study_count": len(studies)},
+                evidence={"accessible_study_count": len(studies), "close_matches": [{"value": requested_study_oid, "similarity": 1.0}]},
                 recommendation=(
                     "The StudyOID exists in your accessible study list, so the "
                     "failure may be caused by metadata version, permissions, or "
