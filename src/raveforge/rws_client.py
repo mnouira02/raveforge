@@ -65,6 +65,35 @@ class RWSClient:
         return self._handle_response(response)
 
     # ------------------------------------------------------------------
+    # Read-only diagnostic support
+    # ------------------------------------------------------------------
+
+    def get_studies_raw(self, endpoint: str = "/RaveWebServices/studies") -> str:
+        """
+        Retrieve the raw ODM XML listing of studies accessible to the
+        authenticated user. Used by RaveDiagnostics for read-only
+        study-name comparison. Does not modify any data.
+
+        Raises:
+            RWSError: On HTTP errors or network failures.
+        """
+        url = f"{self.base_url}{endpoint}"
+        try:
+            response = self._session.get(url, timeout=self.timeout)
+        except requests.exceptions.Timeout:
+            raise RWSError(f"Request timed out after {self.timeout}s.")
+        except requests.exceptions.ConnectionError as exc:
+            raise RWSError(f"Connection failed: {exc}")
+
+        if response.status_code != 200:
+            raise RWSError(
+                f"Failed to retrieve study list (HTTP {response.status_code}).",
+                http_status=response.status_code,
+            )
+
+        return response.text
+
+    # ------------------------------------------------------------------
     # Response handling
     # ------------------------------------------------------------------
 
