@@ -18,6 +18,7 @@ RaveForge is a fluent, stateful Python engine for building RWS-friendly ODM XML 
 - Support for item `SpecifyValue`
 - Pretty-printed XML output for debugging
 - Thin RWS client for submission to Medidata RWS
+- Read-only diagnostics layer for interpreting RWS submission failures
 - Tested with `pytest`
 
 ---
@@ -110,6 +111,61 @@ client = RWSClient(
 
 response = client.post_odm(tx.build())
 print(response)
+```
+
+---
+
+## Diagnosing Submission Failures
+
+`RaveDiagnostics` interprets RWS errors after a failed submission, performs
+read-only lookups against RWS, and returns structured, evidence-based
+reports. It never modifies your transaction or selects a study on your behalf.
+
+```python
+from raveforge import RaveTransaction, RWSError, RaveDiagnostics
+from raveforge.rws_client import RWSClient
+
+tx = (
+    RaveTransaction("Mediflex_Dev")
+    .subject("SUBJ-001", "SITE-001")
+    .event("SCREENING")
+    .form("DM")
+    .item_group("DM_IG")
+    .item("AGE", "42")
+)
+
+client = RWSClient(
+    base_url="https://innovate.mdsol.com",
+    username="username",
+    password="password",
+)
+
+diagnostics = RaveDiagnostics(client)
+
+try:
+    client.post_odm(tx.build())
+except RWSError as error:
+    report = diagnostics.explain_submission_failure(error, transaction=tx)
+    print(report)
+```
+
+Sample output for a study OID mismatch:
+
+```
+[ERROR] Study Not Found
+
+Requested:
+  study_oid: Mediflex_Dev
+
+Evidence:
+  accessible_study_count: 4
+  suggested_matches: [{'value': 'Mediflex_DEV', 'similarity': 0.95}]
+
+Recommendation:
+  Confirm the intended environment and use the exact StudyOID
+  configured in Rave. No payload was changed automatically.
+
+Safe to retry automatically: False
 ```
 
 ---

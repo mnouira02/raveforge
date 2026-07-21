@@ -13,6 +13,17 @@ ODM_NS = "http://www.cdisc.org/ns/odm/v1.3"
 
 _DEFAULT_REPEAT_KEY = "1"
 
+# Register ODM and mdsol namespaces once at module level so that ET.tostring()
+# emits clean prefixes (xmlns="..." and xmlns:mdsol="...") rather than ns0/ns1.
+# Note: ET.register_namespace() is a module-level side effect that affects the
+# global ElementTree namespace registry. This is safe for single-threaded and
+# typical multi-threaded use because the registry is written once with
+# idempotent values. If a future caller registers the same URI under a
+# different prefix in the same process, the last write wins — document this
+# if RaveForge is ever embedded in a larger XML-heavy application.
+ET.register_namespace("", ODM_NS)
+ET.register_namespace("mdsol", MDSOL_NS)
+
 
 class RaveTransaction:
     """
@@ -43,9 +54,6 @@ class RaveTransaction:
         self._current_event: Optional[str] = None
         self._current_form: Optional[str] = None
         self._current_group: Optional[str] = None
-
-        ET.register_namespace("", ODM_NS)
-        ET.register_namespace("mdsol", MDSOL_NS)
 
     # ------------------------------------------------------------------
     # Context manager support
