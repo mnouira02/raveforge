@@ -128,10 +128,9 @@ def test_categorize_error_study_not_found():
     error = RWSError("Study not found or invalid study OID.", http_status=404)
     assert RaveDiagnostics.categorize_error(error) == "study_not_found"
 
-
 def test_categorize_error_unknown():
     error = RWSError("Something strange.", http_status=404)
-    assert RaveDiagnostics.categorize_error(error) == "unknown"
+    assert RaveDiagnostics.categorize_error(error) == "not_found"
 
 
 # -------------------------------------------------------------------
@@ -145,7 +144,7 @@ def test_diagnose_authentication_failure_returns_report():
     error = RWSError("Unauthorised.", http_status=401)
     tx = RaveTransaction("Mediflex_01")
 
-    report = diag.diagnose(error, tx)
+    report = diag.explain_submission_failure(error, tx)
 
     assert isinstance(report, DiagnosticReport)
     assert report.category == "authentication_failed"
@@ -159,7 +158,7 @@ def test_diagnose_authorization_failure_returns_report():
     error = RWSError("Forbidden.", http_status=403)
     tx = RaveTransaction("Mediflex_01")
 
-    report = diag.diagnose(error, tx)
+    report = diag.explain_submission_failure(error, tx)
 
     assert report.category == "authorization_failed"
     assert report.severity == "error"
@@ -172,10 +171,11 @@ def test_diagnose_conflict_returns_report():
     error = RWSError("Conflict.", http_status=409)
     tx = RaveTransaction("Mediflex_01")
 
-    report = diag.diagnose(error, tx)
+    report = diag.explain_submission_failure(error, tx)
 
     assert report.category == "conflict"
     assert report.severity == "error"
+    assert report.safe_to_retry is False
 
 
 def test_diagnose_server_error_returns_safe_to_retry_true():
@@ -184,7 +184,7 @@ def test_diagnose_server_error_returns_safe_to_retry_true():
     error = RWSError("Internal Server Error.", http_status=500)
     tx = RaveTransaction("Mediflex_01")
 
-    report = diag.diagnose(error, tx)
+    report = diag.explain_submission_failure(error, tx)
 
     assert report.category == "server_error"
     assert report.safe_to_retry is True
@@ -197,7 +197,7 @@ def test_diagnose_study_not_found_includes_close_matches():
     # Slightly misspelled OID — Mediflex_01 vs Mediflex_0l
     tx = RaveTransaction("Mediflex_0l")
 
-    report = diag.diagnose(error, tx)
+    report = diag.explain_submission_failure(error, tx)
 
     assert report.category == "study_not_found"
     assert "accessible_study_count" in report.evidence
@@ -217,7 +217,7 @@ def test_diagnose_study_not_found_no_matches_when_completely_different():
     error = RWSError("Study not found.", http_status=404)
     tx = RaveTransaction("ZZZZZZZ_99999")
 
-    report = diag.diagnose(error, tx)
+    report = diag.explain_submission_failure(error, tx)
 
     assert report.category == "study_not_found"
     assert report.evidence["close_matches"] == []
@@ -229,7 +229,7 @@ def test_diagnose_study_not_found_exact_match_found():
     error = RWSError("Study not found.", http_status=404)
     tx = RaveTransaction("Mediflex_01")
 
-    report = diag.diagnose(error, tx)
+    report = diag.explain_submission_failure(error, tx)
 
     assert report.category == "study_not_found"
     close_matches = report.evidence["close_matches"]

@@ -192,6 +192,18 @@ class RaveDiagnostics:
                 ),
                 safe_to_retry=False,
             )
+        
+        if category == "conflict":
+            return DiagnosticReport(
+                category=category,
+                severity="error",
+                evidence={"http_status": error.http_status},
+                recommendation=(
+                    "RWS reported a data conflict. "
+                "Check for duplicate subject keys or concurrent edits."
+                ),
+                safe_to_retry=False,
+            )
 
         if category == "server_error":
             return DiagnosticReport(
@@ -262,7 +274,7 @@ class RaveDiagnostics:
             requested={"study_oid": requested_study_oid},
             evidence={
                 "accessible_study_count": len(studies),
-                "suggested_matches": suggestions,
+                "close_matches": suggestions,
             },
             recommendation=(
                 "Confirm the intended environment and use the exact StudyOID "
