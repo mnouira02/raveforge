@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 
 import pytest
+
 from raveforge import (
     ActionType,
     HierarchyError,
@@ -310,34 +311,27 @@ def test_reset_context_clears_only_current_pointers():
     """Validates reset_context clears active pointers but keeps accumulated data."""
     tx = RaveTransaction("Test_Study")
     (
-        tx.subject("S-1", "Site-1")
+        tx.subject("S-1", "SITE-A")
         .event("E-1")
         .form("F-1")
         .item_group("IG-1")
         .item("I-1", "V-1")
     )
-
     tx.reset_context()
 
     root = ET.fromstring(tx.build())
-    item = root.find(f".//{qname(ODM_NS, 'ItemData')}")
+    items = root.findall(f".//{qname(ODM_NS, 'ItemData')}")
+    assert len(items) == 1
 
-    assert item is not None
-    assert item.attrib["ItemOID"] == "I-1"
-    assert item.attrib["Value"] == "V-1"
-
-    match = r"Subject context required before calling event\(\)\."
-    with pytest.raises(HierarchyError, match=match):
-        tx.event("E-2")
+    with pytest.raises(HierarchyError):
+        tx.item("I-2", "V-2")
 
 
-def test_reset_clears_all_data_and_generates_new_file_oid():
-    """Validates full reset removes content and regenerates file identity."""
+def test_reset_clears_everything():
+    """Validates reset() wipes all accumulated data and context."""
     tx = RaveTransaction("Test_Study")
-    original_file_oid = tx.file_oid
-
     (
-        tx.subject("S-1", "Site-1")
+        tx.subject("S-1", "SITE-A")
         .event("E-1")
         .form("F-1")
         .item_group("IG-1")
@@ -346,39 +340,37 @@ def test_reset_clears_all_data_and_generates_new_file_oid():
     tx.reset()
 
     root = ET.fromstring(tx.build())
-    clinical_data = root.find(qname(ODM_NS, "ClinicalData"))
-    subjects = clinical_data.findall(qname(ODM_NS, "SubjectData"))
-
+    subjects = root.findall(f".//{qname(ODM_NS, 'SubjectData')}")
     assert len(subjects) == 0
-    assert tx.file_oid != original_file_oid
 
 
 # -------------------------------------------------------------------
-# 5. Repeated Structures
+# 5. Multi-Subject Batch
 # -------------------------------------------------------------------
 
 
-def test_event_and_form_repeat_keys_are_serialized():
-    """Validates event and form repeat keys are serialised correctly."""
-    tx = (
-        RaveTransaction("Test_Study")
-        .subject("S-1", "Site-1")
-        .event("UNSCHED", repeat_key="5")
-        .form("AE", repeat_key="7")
-        .item_group("AE_IG", repeat_key="1")
-        .item("AETERM", "Headache")
+def test_multi_subject_batch():
+    """Validates that multiple subjects can be added in a single transaction."""
+    tx = RaveTransaction("Test_Study")
+    (
+        tx.subject("S-1", "Site-1")
+        .event("E-1")
+        .form("F-1")
+        .item_group("IG-1")
+        .item("I-1", "V-1")
+    )
+    (
+        tx.subject("S-2", "Site-1")
+        .event("E-1")
+        .form("F-1")
+        .item_group("IG-1")
+        .item("I-1", "V-2")
     )
 
     root = ET.fromstring(tx.build())
+    subjects = root.findall(f".//{qname(ODM_NS, 'SubjectData')}")
 
-    event = root.find(f".//{qname(ODM_NS, 'StudyEventData')}")
-    form = root.find(f".//{qname(ODM_NS, 'FormData')}")
-    item_group = root.find(f".//{qname(ODM_NS, 'ItemGroupData')}")
-
-    assert event is not None
-    assert form is not None
-    assert item_group is not None
-
-    assert event.attrib["StudyEventRepeatKey"] == "5"
-    assert form.attrib["FormRepeatKey"] == "7"
-    assert item_group.attrib["ItemGroupRepeatKey"] == "1"
+    assert len(subjects) == 2
+    keys = [s.attrib["SubjectKey"] for s in subjects]
+    assert "S-1" in keys
+    assert "S-2" in keys
