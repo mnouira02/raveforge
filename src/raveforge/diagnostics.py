@@ -71,10 +71,6 @@ class RaveDiagnostics:
     def __init__(self, client: Any) -> None:
         self._client = client
 
-    # ------------------------------------------------------------------
-    # Study directory
-    # ------------------------------------------------------------------
-
     def get_studies(self) -> List[Dict[str, str]]:
         """
         Retrieve the list of studies accessible to the authenticated user.
@@ -99,13 +95,8 @@ class RaveDiagnostics:
             studies.append({"oid": oid, "name": name})
         return studies
 
-    # ------------------------------------------------------------------
-    # Matching
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _normalize(value: str) -> str:
-        """Lowercase and strip all non-alphanumeric characters for comparison."""
         return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
     def _find_close_matches(
@@ -115,12 +106,6 @@ class RaveDiagnostics:
         limit: int = 3,
         threshold: float = _MATCH_THRESHOLD,
     ) -> List[Dict[str, Any]]:
-        """
-        Return up to `limit` candidates that are close to `target`.
-
-        Normalised exact matches score 1.0. All other matches are scored
-        using SequenceMatcher and must exceed `threshold` to be included.
-        """
         if not target or not candidates:
             return []
 
@@ -139,18 +124,8 @@ class RaveDiagnostics:
         matches.sort(key=lambda m: m["similarity"], reverse=True)
         return matches[:limit]
 
-    # ------------------------------------------------------------------
-    # Error categorization
-    # ------------------------------------------------------------------
-
     @staticmethod
     def categorize_error(error: RWSError) -> str:
-        """
-        Map an RWSError to a diagnostic category.
-
-        Entity keywords are checked most-specific-first (subject before
-        site before study) to avoid substring false matches.
-        """
         status = error.http_status
         message = str(error).lower()
 
@@ -174,26 +149,12 @@ class RaveDiagnostics:
 
         return "unknown"
 
-    # ------------------------------------------------------------------
-    # Main entry point
-    # ------------------------------------------------------------------
-
     def explain_submission_failure(
         self,
         error: RWSError,
         transaction: Optional["RaveTransaction"] = None,
         include_subject_location: bool = False,
     ) -> DiagnosticReport:
-        """
-        Build a DiagnosticReport for a failed RWS submission.
-
-        Args:
-            error:                    The RWSError raised by RWSClient.post_odm().
-            transaction:              The RaveTransaction that was being submitted.
-                                      When provided, enables study-level lookup.
-            include_subject_location: Reserved for a future phase; has no effect
-                                      in Phase 1.
-        """
         category = self.categorize_error(error)
 
         if category == "authentication_failed":
@@ -241,10 +202,6 @@ class RaveDiagnostics:
             recommendation="Review the RWS error details above for the specific cause.",
             safe_to_retry=False,
         )
-
-    # ------------------------------------------------------------------
-    # Study-level diagnosis
-    # ------------------------------------------------------------------
 
     def _diagnose_study_not_found(self, requested_study_oid: str) -> DiagnosticReport:
         try:
