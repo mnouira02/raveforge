@@ -1,4 +1,4 @@
-"""Phase 3 — Pre-build ODM validation layer.
+"""Pre-build ODM validation layer.
 
 The validator performs structural and semantic checks on a RaveTransaction
 before any XML is serialised. Catching problems here — before bytes hit the
@@ -45,7 +45,7 @@ class ValidationIssue:
     severity: Severity
     code: str
     message: str
-    location: str = ""  # human-readable path, e.g. "SUBJ-001 > VISIT_1 > DM"
+    location: str = ""
 
     def __str__(self) -> str:
         loc = f" [{self.location}]" if self.location else ""
@@ -56,10 +56,6 @@ class ValidationIssue:
 # Validation rules
 # ---------------------------------------------------------------------------
 
-# Rave OID character-set constraint (printable ASCII, no angle brackets or
-# ampersands which would break the XML even after escaping at the attribute
-# level).
-_SAFE_OID_RE = re.compile(r"^[\x20-\x7E]{1,128}$")
 _INVALID_OID_CHARS_RE = re.compile(r"[<>&]")
 
 
@@ -97,7 +93,6 @@ def _validate_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> 
     for subj_key, subj_data in tx._subjects.items():
         subj_loc = subj_key
 
-        # SubjectKey must not be blank
         if not subj_key or not subj_key.strip():
             issues.append(ValidationIssue(
                 severity=Severity.ERROR,
@@ -106,7 +101,6 @@ def _validate_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> 
                 location=subj_loc,
             ))
 
-        # SiteOID must be present
         if not subj_data.get("SiteOID") or not subj_data["SiteOID"].strip():
             issues.append(ValidationIssue(
                 severity=Severity.ERROR,
@@ -115,7 +109,6 @@ def _validate_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> 
                 location=subj_loc,
             ))
 
-        # Warn if subject has no events
         if not subj_data.get("Events"):
             issues.append(ValidationIssue(
                 severity=Severity.WARNING,
@@ -139,7 +132,6 @@ def _validate_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> 
                     location=event_loc,
                 ))
 
-            # Warn if event has no forms
             if not event_data.get("Forms"):
                 issues.append(ValidationIssue(
                     severity=Severity.WARNING,
@@ -163,7 +155,6 @@ def _validate_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> 
                         location=form_loc,
                     ))
 
-                # Warn if form has no item groups
                 if not form_data.get("ItemGroups"):
                     issues.append(ValidationIssue(
                         severity=Severity.WARNING,
@@ -190,7 +181,6 @@ def _validate_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> 
                     for item_oid, item_dict in group_data.get("Items", {}).items():
                         item_loc = f"{group_loc} > {item_oid}"
 
-                        # Item OID must not be blank
                         if not item_oid or not item_oid.strip():
                             issues.append(ValidationIssue(
                                 severity=Severity.ERROR,
@@ -199,7 +189,6 @@ def _validate_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> 
                                 location=group_loc,
                             ))
 
-                        # Warn if item has neither a value nor a query
                         has_data = (
                             item_dict.get("Value") is not None
                             or item_dict.get("Specify") is not None
@@ -253,7 +242,8 @@ def validate(
     Raises:
         ValidationError: If any ERROR-level issue is found, or if *strict* is
             ``True`` and any WARNING-level issue is found.  The exception
-            message aggregates all qualifying issues.
+            message aggregates all qualifying issues, and the ``issues``
+            attribute on the exception carries the structured list.
     """
     issues: List[ValidationIssue] = []
     for rule in _RULES:
@@ -267,7 +257,8 @@ def validate(
     if blocking:
         summary = "\n".join(f"  {i}" for i in blocking)
         raise ValidationError(
-            f"{len(blocking)} validation issue(s) found:\n{summary}"
+            f"{len(blocking)} validation issue(s) found:\n{summary}",
+            issues=blocking,
         )
 
     return issues

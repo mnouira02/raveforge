@@ -4,12 +4,22 @@ dist/
 *.egg-info/
 __pycache__/
 *.pyc
+*.pyo
 
 # Virtual environments
 venv/
 env/
+.venv/
 
-# IDEs and Testing
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Linter and type checker caches
+.ruff_cache/
+.mypy_cache/
+
+# IDEs
 .vscode/
 .idea/
-.pytest_cache/

@@ -3,7 +3,7 @@ import datetime
 import uuid
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 from .exceptions import HierarchyError
 from .enums import ActionType, QueryStatus, QueryRecipient
@@ -13,14 +13,8 @@ ODM_NS = "http://www.cdisc.org/ns/odm/v1.3"
 
 _DEFAULT_REPEAT_KEY = "1"
 
-# Register ODM and mdsol namespaces once at module level so that ET.tostring()
-# emits clean prefixes (xmlns="..." and xmlns:mdsol="...") rather than ns0/ns1.
-# Note: ET.register_namespace() is a module-level side effect that affects the
-# global ElementTree namespace registry. This is safe for single-threaded and
-# typical multi-threaded use because the registry is written once with
-# idempotent values. If a future caller registers the same URI under a
-# different prefix in the same process, the last write wins — document this
-# if RaveForge is ever embedded in a larger XML-heavy application.
+# Register namespaces once at module load so ET.tostring() emits clean
+# prefixes (xmlns="..." and xmlns:mdsol="...") rather than ns0/ns1.
 ET.register_namespace("", ODM_NS)
 ET.register_namespace("mdsol", MDSOL_NS)
 
@@ -81,13 +75,18 @@ class RaveTransaction:
         site_oid: str,
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
-        """Add or switch to a subject context."""
+        """Add or revisit a subject context.
+
+        If the subject already exists in this transaction, its SiteOID and
+        Action are updated to the values provided in the current call.
+        The subject's accumulated events are always preserved.
+        """
         if subject_key not in self._subjects:
-            self._subjects[subject_key] = {
-                "SiteOID": site_oid,
-                "Action": action.value if action else None,
-                "Events": {},
-            }
+            self._subjects[subject_key] = {"Events": {}}
+
+        self._subjects[subject_key]["SiteOID"] = site_oid
+        self._subjects[subject_key]["Action"] = action.value if action else None
+
         self._current_subject = subject_key
         self._current_site = site_oid
         self._current_event = None
@@ -98,18 +97,19 @@ class RaveTransaction:
     def event(
         self,
         event_oid: str,
-        repeat_key: Optional[str] = _DEFAULT_REPEAT_KEY,
+        repeat_key: Optional[str] = None,
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
         """Add or switch to a study event context."""
         if not self._current_subject:
             raise HierarchyError("Subject context required before calling event().")
+        effective_repeat_key = repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
         events = self._subjects[self._current_subject]["Events"]
-        event_key = f"{event_oid}_{repeat_key or _DEFAULT_REPEAT_KEY}"
+        event_key = f"{event_oid}_{effective_repeat_key}"
         if event_key not in events:
             events[event_key] = {
                 "OID": event_oid,
-                "RepeatKey": repeat_key or _DEFAULT_REPEAT_KEY,
+                "RepeatKey": effective_repeat_key,
                 "Action": action.value if action else None,
                 "Forms": {},
             }
@@ -121,18 +121,19 @@ class RaveTransaction:
     def form(
         self,
         form_oid: str,
-        repeat_key: Optional[str] = _DEFAULT_REPEAT_KEY,
+        repeat_key: Optional[str] = None,
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
         """Add or switch to a form context."""
         if not self._current_event:
             raise HierarchyError("Event context required before calling form().")
+        effective_repeat_key = repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
         forms = self._subjects[self._current_subject]["Events"][self._current_event]["Forms"]
-        form_key = f"{form_oid}_{repeat_key or _DEFAULT_REPEAT_KEY}"
+        form_key = f"{form_oid}_{effective_repeat_key}"
         if form_key not in forms:
             forms[form_key] = {
                 "OID": form_oid,
-                "RepeatKey": repeat_key or _DEFAULT_REPEAT_KEY,
+                "RepeatKey": effective_repeat_key,
                 "Action": action.value if action else None,
                 "ItemGroups": {},
             }
@@ -206,7 +207,7 @@ class RaveTransaction:
     # ------------------------------------------------------------------
 
     def reset_context(self) -> RaveTransaction:
-        """Clear all current context pointers without discarding built data."""
+        """Clear all active context pointers without discarding accumulated data."""
         self._current_subject = None
         self._current_site = None
         self._current_event = None
@@ -303,7 +304,7 @@ class RaveTransaction:
         Serialise to a human-readable, indented XML string.
 
         Returns a Unicode string without an encoding declaration.
-        Intended for debugging and logging; use build() for transmission.
+        Intended for debugging and logging; use :meth:`build` for transmission.
         """
         raw = self.build(encoding="unicode")
         parsed = minidom.parseString(raw)

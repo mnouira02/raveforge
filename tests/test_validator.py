@@ -1,4 +1,4 @@
-"""Tests for the Phase 3 ODM validation layer (raveforge.validator)."""
+"""Tests for the ODM validation layer (raveforge.validator)."""
 import pytest
 
 from raveforge import (
@@ -70,7 +70,7 @@ def test_whitespace_only_study_oid_raises_validation_error():
 
 
 def test_study_oid_with_xml_illegal_chars_raises_validation_error():
-    """OID containing < > & should be rejected before any XML is generated."""
+    """OID containing < > & must be rejected before any XML is generated."""
     tx = RaveTransaction(study_oid="Study<Broken>&OID")
     tx.subject("S-1", "SITE-1").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V")
 
@@ -107,7 +107,7 @@ def test_transaction_with_no_subjects_passes_in_non_strict_mode():
 
 def test_subject_with_no_events_is_a_warning():
     tx = RaveTransaction("Test_Study")
-    tx.subject("SUBJ-001", "SITE-001")  # no event chained
+    tx.subject("SUBJ-001", "SITE-001")
 
     with pytest.raises(ValidationError, match="SUBJECT_NO_EVENTS"):
         validate(tx, strict=True)
@@ -117,7 +117,7 @@ def test_subject_with_no_events_is_a_warning():
 
 
 def test_subject_with_empty_site_oid_raises():
-    """Manually construct a state with a blank SiteOID."""
+    """A subject whose SiteOID is blank must fail validation."""
     tx = RaveTransaction("Test_Study")
     tx._subjects["SUBJ-001"] = {"SiteOID": "", "Action": None, "Events": {}}
     tx._current_subject = "SUBJ-001"
@@ -133,7 +133,7 @@ def test_subject_with_empty_site_oid_raises():
 
 def test_event_with_no_forms_is_a_warning():
     tx = RaveTransaction("Test_Study")
-    tx.subject("S-1", "SITE-001").event("SCREENING")  # no form chained
+    tx.subject("S-1", "SITE-001").event("SCREENING")
 
     with pytest.raises(ValidationError, match="EVENT_NO_FORMS"):
         validate(tx, strict=True)
@@ -149,7 +149,7 @@ def test_event_with_no_forms_is_a_warning():
 
 def test_form_with_no_item_groups_is_a_warning():
     tx = RaveTransaction("Test_Study")
-    tx.subject("S-1", "SITE-001").event("SCREENING").form("DM")  # no item_group chained
+    tx.subject("S-1", "SITE-001").event("SCREENING").form("DM")
 
     with pytest.raises(ValidationError, match="FORM_NO_ITEM_GROUPS"):
         validate(tx, strict=True)
@@ -171,7 +171,7 @@ def test_item_with_no_value_or_query_is_a_warning():
         .event("SCREENING")
         .form("DM")
         .item_group("DM_IG")
-        .item("AETERM")  # no value, no specify, no query
+        .item("AETERM")
     )
 
     with pytest.raises(ValidationError, match="ITEM_NO_VALUE"):
@@ -182,28 +182,28 @@ def test_item_with_no_value_or_query_is_a_warning():
 
 
 def test_item_with_only_specify_value_does_not_warn():
-    """An item with only a specify value (no primary value) should not warn."""
+    """An item carrying only a specify value must not trigger ITEM_NO_VALUE."""
     tx = (
         RaveTransaction("Test_Study")
         .subject("S-1", "SITE-001")
         .event("SCREENING")
         .form("MEDS")
         .item_group("MEDS_IG")
-        .item("CMTRT", specify="Custom Blend")  # specify without value
+        .item("CMTRT", specify="Custom Blend")
     )
     issues = validate(tx, strict=True)
     assert issues == []
 
 
 def test_item_with_only_query_does_not_warn():
-    """An item with only a query (no data value) should not warn."""
+    """An item carrying only a query must not trigger ITEM_NO_VALUE."""
     tx = (
         RaveTransaction("Test_Study")
         .subject("S-1", "SITE-001")
         .event("SCREENING")
         .form("VS")
         .item_group("VS_IG")
-        .item("TEMP", query="Please confirm.")  # query without value
+        .item("TEMP", query="Please confirm.")
     )
     issues = validate(tx, strict=True)
     assert issues == []
@@ -215,9 +215,8 @@ def test_item_with_only_query_does_not_warn():
 
 
 def test_multiple_issues_are_aggregated_in_one_exception():
-    """ValidationError should aggregate all issues in a single raise."""
+    """ValidationError must aggregate all blocking issues in a single raise."""
     tx = RaveTransaction(study_oid="Bad<OID>")
-    # Also inject a subject with no events to trigger a second issue
     tx._subjects["SUBJ-001"] = {"SiteOID": "SITE-001", "Action": None, "Events": {}}
     tx._current_subject = "SUBJ-001"
 
@@ -227,6 +226,19 @@ def test_multiple_issues_are_aggregated_in_one_exception():
     message = str(exc_info.value)
     assert "STUDY_OID_INVALID_CHARS" in message
     assert "SUBJECT_NO_EVENTS" in message
+
+
+def test_validation_error_issues_attribute_is_populated_by_validate():
+    """The issues attribute on ValidationError must carry the structured issue list."""
+    tx = RaveTransaction(study_oid="")
+    tx.subject("S-1", "SITE-1").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V")
+
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+
+    err = exc_info.value
+    assert len(err.issues) >= 1
+    assert any(i.code == "STUDY_OID_EMPTY" for i in err.issues)
 
 
 # ---------------------------------------------------------------------------
@@ -271,17 +283,15 @@ def test_validate_returns_empty_list_on_clean_transaction():
 
 
 def test_validate_returns_warning_issues_in_non_strict_mode():
-    """In non-strict mode, validate() must return issues instead of raising."""
+    """In non-strict mode validate() returns issues instead of raising."""
     tx = RaveTransaction(study_oid="Test_Study")
     tx.subject("S-1", "SITE-001").event("VISIT_1").form("LABS")
-    # Form has no item groups — WARNING
 
     issues = validate(tx, strict=False)
 
     assert len(issues) >= 1
     codes = _codes(issues)
     assert "FORM_NO_ITEM_GROUPS" in codes
-    # Return type is always a list regardless of strict mode
     assert isinstance(issues, list)
 
 

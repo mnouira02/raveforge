@@ -11,7 +11,8 @@ class RWSClient:
     """
     Thin HTTP client for submitting ODM XML to Medidata Rave Web Services (RWS).
 
-    Usage:
+    Usage::
+
         client = RWSClient(
             base_url="https://yourdomain.mdsol.com",
             username="svc_account",
@@ -46,7 +47,7 @@ class RWSClient:
         POST an ODM XML payload to Rave RWS.
 
         Args:
-            odm_bytes: The serialised ODM XML from RaveTransaction.build().
+            odm_bytes: The serialised ODM XML from :meth:`RaveTransaction.build`.
             endpoint:  RWS endpoint path (default: PostODMClinicalData).
 
         Returns:
@@ -70,7 +71,7 @@ class RWSClient:
     ) -> str:
         """
         Retrieve the raw ODM XML listing of studies accessible to the
-        authenticated user. Used by RaveDiagnostics for read-only
+        authenticated user. Used by :class:`RaveDiagnostics` for read-only
         study-name comparison. Does not modify any data.
 
         Raises:
@@ -94,8 +95,9 @@ class RWSClient:
         """
         Verify RWS connectivity by calling the version endpoint.
 
-        Returns True if the server responds (including 401 — reachable
-        but not yet authenticated). Returns False on any network failure.
+        Returns ``True`` if the server responds with 200 or 401 (reachable
+        but credentials not yet validated). Returns ``False`` on any network
+        failure.
         """
         try:
             url = f"{self.base_url}/RaveWebServices/webservice.aspx?GetVersion"
@@ -108,7 +110,9 @@ class RWSClient:
         body = response.text
 
         if response.status_code == 200:
-            if "<Response ReferenceNumber" in body and "Error" in body:
+            # RWS sometimes wraps a transaction failure in an HTTP 200 response.
+            # The canonical signal is IsTransactionSuccessful set to false.
+            if "<IsTransactionSuccessful>false</IsTransactionSuccessful>" in body:
                 rws_code = self._extract_rws_code(body)
                 raise RWSError(
                     f"RWS returned an error in a 200 response: {body[:300]}",

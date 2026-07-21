@@ -2,6 +2,7 @@ from .core import RaveTransaction
 from .enums import ActionType, QueryStatus, QueryRecipient
 from .exceptions import RaveForgeError, HierarchyError, ValidationError, RWSError
 from .diagnostics import RaveDiagnostics, DiagnosticReport
+from .rws_client import RWSClient
 from .validator import validate, ValidationIssue, Severity
 
 __all__ = [
@@ -16,6 +17,8 @@ __all__ = [
     "HierarchyError",
     "ValidationError",
     "RWSError",
+    # HTTP client
+    "RWSClient",
     # Diagnostics
     "RaveDiagnostics",
     "DiagnosticReport",

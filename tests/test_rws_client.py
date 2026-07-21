@@ -234,7 +234,7 @@ def test_post_odm_raises_on_unexpected_http_status(mock_post):
 
 @patch("requests.Session.post")
 def test_post_odm_raises_when_rws_error_is_embedded_in_200(mock_post):
-    """Validates a 200 response containing an RWS error is treated as failure."""
+    """Validates a 200 response containing IsTransactionSuccessful=false is treated as failure."""
     mock_post.return_value = make_mock_response(
         status_code=200,
         text=(
@@ -258,6 +258,24 @@ def test_post_odm_raises_when_rws_error_is_embedded_in_200(mock_post):
     assert "RWS returned an error in a 200 response" in str(err)
     assert err.http_status == 200
     assert err.rws_code == "RWS00037"
+
+
+@patch("requests.Session.post")
+def test_post_odm_success_body_containing_word_error_does_not_raise(mock_post):
+    """Validates that a 200 body containing the word 'Error' in a non-failure context does not raise."""
+    mock_post.return_value = make_mock_response(
+        status_code=200,
+        text="<Response ReferenceNumber=\"abc\">No errors reported.</Response>",
+    )
+
+    client = RWSClient(
+        base_url="https://innovate.mdsol.com",
+        username="user",
+        password="pass",
+    )
+
+    result = client.post_odm(b"<ODM />")
+    assert "No errors reported" in result
 
 
 # -------------------------------------------------------------------
@@ -347,7 +365,7 @@ def test_ping_returns_true_on_200(mock_get):
 
 @patch("requests.Session.get")
 def test_ping_returns_true_on_401(mock_get):
-    """Validates ping still returns True when endpoint is reachable but auth fails."""
+    """Validates ping still returns True when endpoint is reachable but credentials are not yet validated."""
     mock_get.return_value = make_mock_response(status_code=401, text="Unauthorized")
 
     client = RWSClient(
@@ -361,7 +379,7 @@ def test_ping_returns_true_on_401(mock_get):
 
 @patch("requests.Session.get")
 def test_ping_returns_false_on_request_exception(mock_get):
-    """Validates ping returns False when network call fails."""
+    """Validates ping returns False when the network call fails."""
     mock_get.side_effect = requests.exceptions.RequestException("DNS failure")
 
     client = RWSClient(

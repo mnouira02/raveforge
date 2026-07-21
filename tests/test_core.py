@@ -205,6 +205,32 @@ def test_context_manager_support():
     assert item.attrib["Value"] == "V-1"
 
 
+def test_subject_revisit_updates_site_oid():
+    """Validates that calling subject() again with a new SiteOID updates it correctly."""
+    tx = RaveTransaction("Test_Study")
+    tx.subject("S-1", "SITE-A").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1")
+    tx.subject("S-1", "SITE-B")
+
+    root = ET.fromstring(tx.build())
+    site_ref = root.find(f".//{qname(ODM_NS, 'SiteRef')}")
+
+    assert site_ref is not None
+    assert site_ref.attrib["LocationOID"] == "SITE-B"
+
+
+def test_subject_revisit_preserves_events():
+    """Validates that revisiting a subject does not discard its accumulated events."""
+    tx = RaveTransaction("Test_Study")
+    tx.subject("S-1", "SITE-A").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1")
+    tx.subject("S-1", "SITE-B")
+
+    root = ET.fromstring(tx.build())
+    items = root.findall(f".//{qname(ODM_NS, 'ItemData')}")
+
+    assert len(items) == 1
+    assert items[0].attrib["ItemOID"] == "I-1"
+
+
 # -------------------------------------------------------------------
 # 3. Defensive State Machine (Negative Tests)
 # -------------------------------------------------------------------
@@ -290,7 +316,7 @@ def test_reset_clears_all_data_and_generates_new_file_oid():
 
 
 def test_event_and_form_repeat_keys_are_serialized():
-    """Validates event and form repeat keys are not hardcoded."""
+    """Validates event and form repeat keys are serialised correctly."""
     tx = (
         RaveTransaction("Test_Study")
         .subject("S-1", "Site-1")

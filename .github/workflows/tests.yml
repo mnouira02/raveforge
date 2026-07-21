@@ -28,8 +28,11 @@ jobs:
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      - name: Install package
+      - name: Install package with dev dependencies
         run: pip install -e .[dev]
 
-      - name: Run tests
-        run: pytest -v
+      - name: Lint
+        run: ruff check src/ tests/
+
+      - name: Run tests with coverage
+        run: pytest --cov=raveforge --cov-report=term-missing -v
