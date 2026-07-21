@@ -1,7 +1,6 @@
 import xml.etree.ElementTree as ET
 
 import pytest
-
 from raveforge import (
     ActionType,
     HierarchyError,
@@ -9,7 +8,6 @@ from raveforge import (
     QueryStatus,
     RaveTransaction,
 )
-
 
 ODM_NS = "http://www.cdisc.org/ns/odm/v1.3"
 MDSOL_NS = "http://www.mdsol.com/ns/odm/metadata"
