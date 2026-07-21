@@ -1,12 +1,13 @@
 from __future__ import annotations
+
 import datetime
 import uuid
 import xml.etree.ElementTree as ET
+from typing import Any, Dict, Optional
 from xml.dom import minidom
-from typing import Dict, Any, Optional
 
+from .enums import ActionType, QueryRecipient, QueryStatus
 from .exceptions import HierarchyError
-from .enums import ActionType, QueryStatus, QueryRecipient
 
 MDSOL_NS = "http://www.mdsol.com/ns/odm/metadata"
 ODM_NS = "http://www.cdisc.org/ns/odm/v1.3"
@@ -103,7 +104,9 @@ class RaveTransaction:
         """Add or switch to a study event context."""
         if not self._current_subject:
             raise HierarchyError("Subject context required before calling event().")
-        effective_repeat_key = repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
+        effective_repeat_key = (
+            repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
+        )
         events = self._subjects[self._current_subject]["Events"]
         event_key = f"{event_oid}_{effective_repeat_key}"
         if event_key not in events:
@@ -127,8 +130,12 @@ class RaveTransaction:
         """Add or switch to a form context."""
         if not self._current_event:
             raise HierarchyError("Event context required before calling form().")
-        effective_repeat_key = repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
-        forms = self._subjects[self._current_subject]["Events"][self._current_event]["Forms"]
+        effective_repeat_key = (
+            repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
+        )
+        forms = (
+            self._subjects[self._current_subject]["Events"][self._current_event]["Forms"]
+        )
         form_key = f"{form_oid}_{effective_repeat_key}"
         if form_key not in forms:
             forms[form_key] = {
@@ -151,7 +158,9 @@ class RaveTransaction:
         """Add or switch to an item group context."""
         if not self._current_form:
             raise HierarchyError("Form context required before calling item_group().")
-        effective_repeat_key = repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
+        effective_repeat_key = (
+            repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
+        )
         groups = (
             self._subjects[self._current_subject]["Events"][self._current_event]
             ["Forms"][self._current_form]["ItemGroups"]
@@ -268,7 +277,9 @@ class RaveTransaction:
                     form_node = ET.SubElement(event_node, "FormData", form_attribs)
 
                     for group_data in form_data["ItemGroups"].values():
-                        group_attribs: Dict[str, str] = {"ItemGroupOID": group_data["OID"]}
+                        group_attribs: Dict[str, str] = {
+                            "ItemGroupOID": group_data["OID"]
+                        }
                         if group_data["RepeatKey"] is not None:
                             group_attribs["ItemGroupRepeatKey"] = group_data["RepeatKey"]
                         if group_data["Action"]:
@@ -283,9 +294,12 @@ class RaveTransaction:
                             if item_dict["Value"] is not None:
                                 item_attribs["Value"] = str(item_dict["Value"])
                             if item_dict["Specify"] is not None:
-                                item_attribs[f"{{{MDSOL_NS}}}SpecifyValue"] = str(item_dict["Specify"])
+                                specify_key = f"{{{MDSOL_NS}}}SpecifyValue"
+                                item_attribs[specify_key] = str(item_dict["Specify"])
 
-                            item_node = ET.SubElement(group_node, "ItemData", item_attribs)
+                            item_node = ET.SubElement(
+                                group_node, "ItemData", item_attribs
+                            )
 
                             if item_dict["Query"]:
                                 ET.SubElement(

@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import difflib
 import re
 import xml.etree.ElementTree as ET
@@ -90,7 +91,9 @@ class RaveDiagnostics:
             return studies
         for study in root.iter(f"{{{ODM_NS}}}Study"):
             oid = study.attrib.get("OID", "")
-            name_node = study.find(f"{{{ODM_NS}}}GlobalVariables/{{{ODM_NS}}}StudyName")
+            name_node = study.find(
+                f"{{{ODM_NS}}}GlobalVariables/{{{ODM_NS}}}StudyName"
+            )
             name = name_node.text if name_node is not None and name_node.text else oid
             studies.append({"oid": oid, "name": name})
         return studies
@@ -117,7 +120,9 @@ class RaveDiagnostics:
             if normalized_candidate == normalized_target:
                 matches.append({"value": candidate, "similarity": 1.0})
                 continue
-            ratio = difflib.SequenceMatcher(None, normalized_target, normalized_candidate).ratio()
+            ratio = difflib.SequenceMatcher(
+                None, normalized_target, normalized_candidate
+            ).ratio()
             if ratio >= threshold:
                 matches.append({"value": candidate, "similarity": round(ratio, 2)})
 
@@ -162,7 +167,9 @@ class RaveDiagnostics:
                 category=category,
                 severity="error",
                 evidence={"http_status": error.http_status},
-                recommendation="Verify the username and password used to authenticate with RWS.",
+                recommendation=(
+                    "Verify the username and password used to authenticate with RWS."
+                ),
                 safe_to_retry=False,
             )
 
@@ -184,7 +191,9 @@ class RaveDiagnostics:
                 category=category,
                 severity="error",
                 evidence={"http_status": error.http_status},
-                recommendation="RWS returned a server error. Retry later or contact Medidata support.",
+                recommendation=(
+                    "RWS returned a server error. Retry later or contact Medidata support."
+                ),
                 safe_to_retry=True,
             )
 
