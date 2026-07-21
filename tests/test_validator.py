@@ -215,7 +215,13 @@ def test_validate_item_no_value_is_warning():
 def test_validate_item_with_specify_does_not_warn():
     """An item with only a specify value should not trigger ITEM_NO_VALUE."""
     tx = RaveTransaction("STUDY_01")
-    tx.subject("SUBJ-001", "SITE-01").event("V1").form("DM").item_group("G1").item("RACE", specify="Mixed")
+    (
+        tx.subject("SUBJ-001", "SITE-01")
+          .event("V1")
+          .form("DM")
+          .item_group("G1")
+          .item("RACE", specify="Mixed")
+    )
     issues = validate(tx, strict=False)
     assert not any(i.code == "ITEM_NO_VALUE" for i in issues)
 
@@ -223,7 +229,13 @@ def test_validate_item_with_specify_does_not_warn():
 def test_validate_item_with_query_does_not_warn():
     """An item with only a query should not trigger ITEM_NO_VALUE."""
     tx = RaveTransaction("STUDY_01")
-    tx.subject("SUBJ-001", "SITE-01").event("V1").form("DM").item_group("G1").item("AGE", query="Please clarify.")
+    (
+        tx.subject("SUBJ-001", "SITE-01")
+          .event("V1")
+          .form("DM")
+          .item_group("G1")
+          .item("AGE", query="Please clarify.")
+    )
     issues = validate(tx, strict=False)
     assert not any(i.code == "ITEM_NO_VALUE" for i in issues)
 
