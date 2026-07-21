@@ -6,7 +6,6 @@ import pytest
 from raveforge import RaveTransaction, ValidationError, validate
 from raveforge.validator import Severity, ValidationIssue
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
