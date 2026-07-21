@@ -72,11 +72,13 @@ def test_fluent_hierarchy_success():
     """Validates that a correctly chained builder produces the expected hierarchy."""
     tx = RaveTransaction(study_oid="Test_Study")
 
-    tx.subject("SUBJ-101", site_oid="SITE-A", action=ActionType.UPSERT) \
-        .event("SCREENING", repeat_key="1", action=ActionType.UPDATE) \
-        .form("VS", repeat_key="2", action=ActionType.INSERT) \
-        .item_group("VS_GROUP", repeat_key="3", action=ActionType.UPDATE) \
+    (
+        tx.subject("SUBJ-101", site_oid="SITE-A", action=ActionType.UPSERT)
+        .event("SCREENING", repeat_key="1", action=ActionType.UPDATE)
+        .form("VS", repeat_key="2", action=ActionType.INSERT)
+        .item_group("VS_GROUP", repeat_key="3", action=ActionType.UPDATE)
         .item("VSORRES", "120")
+    )
 
     root = ET.fromstring(tx.build())
     clinical_data = root.find(qname(ODM_NS, "ClinicalData"))
@@ -116,9 +118,11 @@ def test_fluent_hierarchy_success():
 def test_multiple_items_in_group():
     """Validates that multiple items can be added to the same item group."""
     tx = RaveTransaction(study_oid="Test_Study")
-    tx.subject("S-1", "Site-1").event("E-1").form("F-1").item_group("IG-1") \
-        .item("WEIGHT", "75") \
+    (
+        tx.subject("S-1", "Site-1").event("E-1").form("F-1").item_group("IG-1")
+        .item("WEIGHT", "75")
         .item("HEIGHT", "180")
+    )
 
     root = ET.fromstring(tx.build())
     items = root.findall(f".//{qname(ODM_NS, 'ItemData')}")
@@ -263,7 +267,7 @@ def test_subject_revisit_preserves_events():
 def test_hierarchy_enforcement_event_without_subject():
     """Ensures developers cannot define an event without subject context."""
     tx = RaveTransaction(study_oid="Test_Study")
-    match = "Subject context required before calling event\\(\\)."
+    match = r"Subject context required before calling event\(\)\."
 
     with pytest.raises(HierarchyError, match=match):
         tx.event("SCREENING")
@@ -273,7 +277,7 @@ def test_hierarchy_enforcement_form_without_event():
     """Ensures developers cannot define a form without event context."""
     tx = RaveTransaction(study_oid="Test_Study")
     tx.subject("S-1", "Site-1")
-    match = "Event context required before calling form\\(\\)."
+    match = r"Event context required before calling form\(\)\."
 
     with pytest.raises(HierarchyError, match=match):
         tx.form("F-1")
@@ -283,7 +287,7 @@ def test_hierarchy_enforcement_item_group_without_form():
     """Ensures developers cannot define an item group without form context."""
     tx = RaveTransaction(study_oid="Test_Study")
     tx.subject("S-1", "Site-1").event("E-1")
-    match = "Form context required before calling item_group\\(\\)."
+    match = r"Form context required before calling item_group\(\)\."
 
     with pytest.raises(HierarchyError, match=match):
         tx.item_group("IG-1")
@@ -293,7 +297,7 @@ def test_hierarchy_enforcement_item_without_group():
     """Ensures data items cannot be added without an active item group."""
     tx = RaveTransaction(study_oid="Test_Study")
     tx.subject("S-1", "Site-1").event("E-1").form("F-1")
-    match = "ItemGroup context required before calling item\\(\\)."
+    match = r"ItemGroup context required before calling item\(\)\."
 
     with pytest.raises(HierarchyError, match=match):
         tx.item("VITAL", "120")
@@ -324,7 +328,7 @@ def test_reset_context_clears_only_current_pointers():
     assert item.attrib["ItemOID"] == "I-1"
     assert item.attrib["Value"] == "V-1"
 
-    match = "Subject context required before calling event\\(\\)."
+    match = r"Subject context required before calling event\(\)\."
     with pytest.raises(HierarchyError, match=match):
         tx.event("E-2")
 

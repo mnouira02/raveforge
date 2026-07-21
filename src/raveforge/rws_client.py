@@ -123,11 +123,11 @@ class RWSClient:
             return body
 
         rws_messages = {
-            400: "Bad Request — malformed ODM XML.",
-            401: "Unauthorised — check credentials.",
-            403: "Forbidden — insufficient RWS permissions.",
-            404: "Not Found — check study OID or endpoint URL.",
-            409: "Conflict — transaction violates study configuration.",
+            400: "Bad Request \u2014 malformed ODM XML.",
+            401: "Unauthorised \u2014 check credentials.",
+            403: "Forbidden \u2014 insufficient RWS permissions.",
+            404: "Not Found \u2014 check study OID or endpoint URL.",
+            409: "Conflict \u2014 transaction violates study configuration.",
         }
         message = rws_messages.get(
             response.status_code, f"Unexpected HTTP {response.status_code}."

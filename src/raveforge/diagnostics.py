@@ -32,7 +32,10 @@ class DiagnosticReport:
     safe_to_retry: bool = False
 
     def format_human_readable(self) -> str:
-        lines = [f"[{self.severity.upper()}] {self.category.replace('_', ' ').title()}"]
+        lines = [
+            f"[{self.severity.upper()}] "
+            f"{self.category.replace('_', ' ').title()}"
+        ]
 
         if self.requested:
             lines.append("")
@@ -94,7 +97,11 @@ class RaveDiagnostics:
             name_node = study.find(
                 f"{{{ODM_NS}}}GlobalVariables/{{{ODM_NS}}}StudyName"
             )
-            name = name_node.text if name_node is not None and name_node.text else oid
+            name = (
+                name_node.text
+                if name_node is not None and name_node.text
+                else oid
+            )
             studies.append({"oid": oid, "name": name})
         return studies
 
@@ -192,7 +199,8 @@ class RaveDiagnostics:
                 severity="error",
                 evidence={"http_status": error.http_status},
                 recommendation=(
-                    "RWS returned a server error. Retry later or contact Medidata support."
+                    "RWS returned a server error. "
+                    "Retry later or contact Medidata support."
                 ),
                 safe_to_retry=True,
             )
@@ -208,7 +216,9 @@ class RaveDiagnostics:
                 "rws_code": error.rws_code,
                 "message": str(error),
             },
-            recommendation="Review the RWS error details above for the specific cause.",
+            recommendation=(
+                "Review the RWS error details above for the specific cause."
+            ),
             safe_to_retry=False,
         )
 

@@ -77,7 +77,9 @@ def _validate_study_oid(tx: "RaveTransaction", issues: List[ValidationIssue]) ->
         ))
 
 
-def _validate_has_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> None:
+def _validate_has_subjects(
+    tx: "RaveTransaction", issues: List[ValidationIssue]
+) -> None:
     if not tx._subjects:
         issues.append(ValidationIssue(
             severity=Severity.WARNING,
@@ -174,7 +176,9 @@ def _validate_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> 
                         issues.append(ValidationIssue(
                             severity=Severity.ERROR,
                             code="ITEM_GROUP_OID_EMPTY",
-                            message="An item group was added with an empty ItemGroupOID.",
+                            message=(
+                                "An item group was added with an empty ItemGroupOID."
+                            ),
                             location=group_loc,
                         ))
 
@@ -199,8 +203,9 @@ def _validate_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> 
                                 severity=Severity.WARNING,
                                 code="ITEM_NO_VALUE",
                                 message=(
-                                    f"Item '{item_oid}' has no value, specify, or query. "
-                                    f"An empty ItemData element will be serialised."
+                                    f"Item '{item_oid}' has no value, specify, or "
+                                    f"query. An empty ItemData element will be "
+                                    f"serialised."
                                 ),
                                 location=item_loc,
                             ))

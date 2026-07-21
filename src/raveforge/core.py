@@ -134,7 +134,8 @@ class RaveTransaction:
             repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
         )
         forms = (
-            self._subjects[self._current_subject]["Events"][self._current_event]["Forms"]
+            self._subjects[self._current_subject]
+            ["Events"][self._current_event]["Forms"]
         )
         form_key = f"{form_oid}_{effective_repeat_key}"
         if form_key not in forms:
@@ -162,7 +163,8 @@ class RaveTransaction:
             repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
         )
         groups = (
-            self._subjects[self._current_subject]["Events"][self._current_event]
+            self._subjects[self._current_subject]
+            ["Events"][self._current_event]
             ["Forms"][self._current_form]["ItemGroups"]
         )
         group_key = f"{item_group_oid}_{effective_repeat_key}"
@@ -200,8 +202,10 @@ class RaveTransaction:
         if not self._current_group:
             raise HierarchyError("ItemGroup context required before calling item().")
         items = (
-            self._subjects[self._current_subject]["Events"][self._current_event]
-            ["Forms"][self._current_form]["ItemGroups"][self._current_group]["Items"]
+            self._subjects[self._current_subject]
+            ["Events"][self._current_event]
+            ["Forms"][self._current_form]
+            ["ItemGroups"][self._current_group]["Items"]
         )
         items[item_oid] = {
             "Value": value,
@@ -226,7 +230,7 @@ class RaveTransaction:
         return self
 
     def reset(self) -> RaveTransaction:
-        """Fully reset the transaction, clearing all subjects and regenerating the file identity."""
+        """Fully reset the transaction, clearing all subjects and regenerating file identity."""
         self._subjects = {}
         self.file_oid = str(uuid.uuid4())
         return self.reset_context()
@@ -241,7 +245,9 @@ class RaveTransaction:
             "xmlns": ODM_NS,
             "FileType": "Transactional",
             "FileOID": self.file_oid,
-            "CreationDateTime": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "CreationDateTime": (
+                datetime.datetime.now(datetime.timezone.utc).isoformat()
+            ),
             "ODMVersion": "1.3",
         })
 
@@ -265,7 +271,9 @@ class RaveTransaction:
                 }
                 if event_data["Action"]:
                     event_attribs["TransactionType"] = event_data["Action"]
-                event_node = ET.SubElement(subj_node, "StudyEventData", event_attribs)
+                event_node = ET.SubElement(
+                    subj_node, "StudyEventData", event_attribs
+                )
 
                 for form_data in event_data["Forms"].values():
                     form_attribs: Dict[str, str] = {
@@ -274,20 +282,28 @@ class RaveTransaction:
                     }
                     if form_data["Action"]:
                         form_attribs["TransactionType"] = form_data["Action"]
-                    form_node = ET.SubElement(event_node, "FormData", form_attribs)
+                    form_node = ET.SubElement(
+                        event_node, "FormData", form_attribs
+                    )
 
                     for group_data in form_data["ItemGroups"].values():
                         group_attribs: Dict[str, str] = {
                             "ItemGroupOID": group_data["OID"]
                         }
                         if group_data["RepeatKey"] is not None:
-                            group_attribs["ItemGroupRepeatKey"] = group_data["RepeatKey"]
+                            group_attribs["ItemGroupRepeatKey"] = (
+                                group_data["RepeatKey"]
+                            )
                         if group_data["Action"]:
                             group_attribs["TransactionType"] = group_data["Action"]
                         if group_data["SpecifiedItemsOnly"]:
-                            group_attribs[f"{{{MDSOL_NS}}}Submission"] = "SpecifiedItemsOnly"
+                            group_attribs[f"{{{MDSOL_NS}}}Submission"] = (
+                                "SpecifiedItemsOnly"
+                            )
 
-                        group_node = ET.SubElement(form_node, "ItemGroupData", group_attribs)
+                        group_node = ET.SubElement(
+                            form_node, "ItemGroupData", group_attribs
+                        )
 
                         for item_oid, item_dict in group_data["Items"].items():
                             item_attribs: Dict[str, str] = {"ItemOID": item_oid}
@@ -295,7 +311,9 @@ class RaveTransaction:
                                 item_attribs["Value"] = str(item_dict["Value"])
                             if item_dict["Specify"] is not None:
                                 specify_key = f"{{{MDSOL_NS}}}SpecifyValue"
-                                item_attribs[specify_key] = str(item_dict["Specify"])
+                                item_attribs[specify_key] = str(
+                                    item_dict["Specify"]
+                                )
 
                             item_node = ET.SubElement(
                                 group_node, "ItemData", item_attribs

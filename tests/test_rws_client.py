@@ -265,11 +265,11 @@ def test_post_odm_raises_when_rws_error_is_embedded_in_200(mock_post):
 
 
 @patch("requests.Session.post")
-def test_post_odm_success_body_containing_word_error_does_not_raise(mock_post):
-    """Validates a 200 body with 'Error' in a non-failure context does not raise."""
+def test_post_odm_success_body_word_error_does_not_raise(mock_post):
+    """Validates a 200 body with 'Error' in non-failure context does not raise."""
     mock_post.return_value = make_mock_response(
         status_code=200,
-        text="<Response ReferenceNumber=\"abc\">No errors reported.</Response>",
+        text='<Response ReferenceNumber="abc">No errors reported.</Response>',
     )
 
     client = RWSClient(
@@ -369,7 +369,7 @@ def test_ping_returns_true_on_200(mock_get):
 
 @patch("requests.Session.get")
 def test_ping_returns_true_on_401(mock_get):
-    """Validates ping returns True when reachable but credentials not yet validated."""
+    """Validates ping returns True when reachable but credentials not validated."""
     mock_get.return_value = make_mock_response(status_code=401, text="Unauthorized")
 
     client = RWSClient(
