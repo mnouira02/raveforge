@@ -259,7 +259,9 @@ class RaveDiagnostics:
                 requested={"study_oid": requested_study_oid},
                 evidence={
                     "accessible_study_count": len(studies),
-                    "close_matches": [{"value": requested_study_oid, "similarity": 1.0}]
+                    "close_matches": [
+                        {"value": requested_study_oid, "similarity": 1.0}
+                    ],
                 },
                 recommendation=(
                     "The StudyOID exists in your accessible study list, so the "
