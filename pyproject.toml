@@ -48,7 +48,6 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mnouira02/raveforge"
 Repository = "https://github.com/mnouira02/raveforge"
 Issues = "https://github.com/mnouira02/raveforge/issues"
 

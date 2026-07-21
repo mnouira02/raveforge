@@ -151,15 +151,16 @@ class RaveTransaction:
         """Add or switch to an item group context."""
         if not self._current_form:
             raise HierarchyError("Form context required before calling item_group().")
+        effective_repeat_key = repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
         groups = (
             self._subjects[self._current_subject]["Events"][self._current_event]
             ["Forms"][self._current_form]["ItemGroups"]
         )
-        group_key = f"{item_group_oid}_{repeat_key or 'default'}"
+        group_key = f"{item_group_oid}_{effective_repeat_key}"
         if group_key not in groups:
             groups[group_key] = {
                 "OID": item_group_oid,
-                "RepeatKey": repeat_key,
+                "RepeatKey": effective_repeat_key,
                 "Action": action.value if action else None,
                 "SpecifiedItemsOnly": specified_items_only,
                 "Items": {},
@@ -306,6 +307,8 @@ class RaveTransaction:
         Returns a Unicode string without an encoding declaration.
         Intended for debugging and logging; use :meth:`build` for transmission.
         """
+        # encoding="unicode" produces a bare string with no XML declaration,
+        # allowing minidom.toprettyxml to add its own without duplication.
         raw = self.build(encoding="unicode")
         parsed = minidom.parseString(raw)
         return parsed.toprettyxml(indent="  ", encoding=None)
