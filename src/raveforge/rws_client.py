@@ -8,6 +8,15 @@ from requests.auth import HTTPBasicAuth
 
 from .exceptions import RWSError
 
+# Rave returns an HTTP 200 with the HTML login page when credentials are
+# invalid or the session has expired.  Detect this by looking for the
+# characteristic <form> action that Rave always uses on its login page.
+_LOGIN_PAGE_MARKERS = (
+    "Login.aspx",
+    "UserLoginBox",
+    "Medidata Classic Rave",
+)
+
 
 class RWSClient:
     """
@@ -98,12 +107,16 @@ class RWSClient:
 
         Returns ``True`` if the server responds with 200 or 401 (reachable
         but credentials not yet validated). Returns ``False`` on any network
-        failure.
+        failure or if a login-page redirect is returned.
         """
         try:
             url = f"{self.base_url}/RaveWebServices/webservice.aspx?GetVersion"
             r = self._session.get(url, timeout=self.timeout)
-            return r.status_code in (200, 401)
+            if r.status_code == 401:
+                return True
+            if r.status_code == 200:
+                return not self._is_login_page(r.text)
+            return False
         except requests.exceptions.RequestException:
             return False
 
@@ -111,6 +124,14 @@ class RWSClient:
         body = response.text
 
         if response.status_code == 200:
+            # Rave sometimes returns a 200 with the HTML login page when
+            # credentials are wrong or the session has expired.
+            if self._is_login_page(body):
+                raise RWSError(
+                    "Unauthorised — RWS redirected to the login page. "
+                    "Check your username and password.",
+                    http_status=401,
+                )
             # RWS sometimes wraps a transaction failure in an HTTP 200 response.
             # The canonical signal is IsTransactionSuccessful set to false.
             if "<IsTransactionSuccessful>false</IsTransactionSuccessful>" in body:
@@ -123,17 +144,22 @@ class RWSClient:
             return body
 
         rws_messages = {
-            400: "Bad Request \u2014 malformed ODM XML.",
-            401: "Unauthorised \u2014 check credentials.",
-            403: "Forbidden \u2014 insufficient RWS permissions.",
-            404: "Not Found \u2014 check study OID or endpoint URL.",
-            409: "Conflict \u2014 transaction violates study configuration.",
+            400: "Bad Request — malformed ODM XML.",
+            401: "Unauthorised — check credentials.",
+            403: "Forbidden — insufficient RWS permissions.",
+            404: "Not Found — check study OID or endpoint URL.",
+            409: "Conflict — transaction violates study configuration.",
         }
         message = rws_messages.get(
             response.status_code, f"Unexpected HTTP {response.status_code}."
         )
         rws_code = self._extract_rws_code(body)
         raise RWSError(message, rws_code=rws_code, http_status=response.status_code)
+
+    @staticmethod
+    def _is_login_page(body: str) -> bool:
+        """Return True if the response body looks like the Rave HTML login page."""
+        return any(marker in body for marker in _LOGIN_PAGE_MARKERS)
 
     @staticmethod
     def _extract_rws_code(body: str) -> Optional[str]:
