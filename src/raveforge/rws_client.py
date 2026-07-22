@@ -65,7 +65,7 @@ class RWSClient:
             endpoint:  RWS endpoint path (default: PostODMClinicalData).
 
         Returns:
-            The raw RWS response body as a string.
+            The raw RWS response body as a string (BOM-stripped).
 
         Raises:
             RWSError: On HTTP errors or RWS-level error responses.
@@ -89,9 +89,8 @@ class RWSClient:
         Retrieve the raw ODM XML listing of studies accessible to the
         authenticated user.
 
-        Routes through ``_handle_response`` so that login-page redirects
-        (HTTP 200 with HTML body) raise ``RWSError`` instead of silently
-        returning empty XML.
+        Returns BOM-stripped XML so callers can pass directly to
+        ``ET.fromstring`` without a ``ParseError``.
 
         Raises:
             RWSError: On HTTP errors, auth failures, or network failures.
@@ -120,8 +119,8 @@ class RWSClient:
         """
         Retrieve the raw XML listing of sites for a given study.
 
-        Routes through ``_handle_response`` so that auth failures surface
-        as ``RWSError`` rather than empty results.
+        Returns BOM-stripped XML so callers can pass directly to
+        ``ET.fromstring`` without a ``ParseError``.
 
         Raises:
             RWSError: On HTTP errors, auth failures, or network failures.
@@ -163,7 +162,11 @@ class RWSClient:
             return False
 
     def _handle_response(self, response: requests.Response) -> str:
-        body = response.text
+        # RWS prepends a UTF-8 BOM (\xef\xbb\xbf / \ufeff) to every XML
+        # response body. requests preserves it in response.text, and
+        # ET.fromstring() rejects it with ParseError. Strip it here once
+        # so every caller receives clean, parseable XML.
+        body = response.text.lstrip("\ufeff")
 
         if response.status_code == 200:
             # Rave sometimes returns a 200 with the HTML login page when
