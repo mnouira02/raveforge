@@ -112,6 +112,7 @@ for w in warnings:
 | `STUDY_OID_EMPTY` | ERROR | `study_oid` is blank or whitespace-only |
 | `STUDY_OID_INVALID_CHARS` | ERROR | `study_oid` contains `<`, `>`, or `&` |
 | `NO_SUBJECTS` | WARNING | Transaction has no subjects at all |
+| `SUBJECT_KEY_EMPTY` | ERROR | A subject was added with an empty `SubjectKey` |
 | `SUBJECT_NO_EVENTS` | WARNING | A subject has no events |
 | `SITE_OID_EMPTY` | ERROR | A subject's `SiteOID` is blank |
 | `EVENT_NO_FORMS` | WARNING | An event has no forms |
