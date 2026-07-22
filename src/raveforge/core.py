@@ -82,21 +82,12 @@ class RaveTransaction:
         Action are updated to the values provided in the current call.
         The subject's accumulated events are always preserved.
 
-        Raises:
-            ValueError: If ``subject_key`` or ``site_oid`` is empty or
-                        contains only whitespace.
+        Invalid values (empty, whitespace) are accepted here and reported
+        as structured issues by :func:`raveforge.validate` rather than
+        raising immediately.  This keeps the builder's responsibility
+        limited to recording intent and leaves correctness checks to the
+        dedicated validation layer.
         """
-        if not subject_key or not subject_key.strip():
-            raise ValueError(
-                "subject_key must not be empty or whitespace. "
-                f"Got: {subject_key!r}"
-            )
-        if not site_oid or not site_oid.strip():
-            raise ValueError(
-                "site_oid must not be empty or whitespace. "
-                f"Got: {site_oid!r}"
-            )
-
         if subject_key not in self._subjects:
             self._subjects[subject_key] = {"Events": {}}
 
