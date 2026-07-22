@@ -25,9 +25,11 @@ def _parse_study_oid(study_oid: str) -> Tuple[str, str]:
     """
     Split a Rave study OID into ``(project_name, environment_name)``.
 
-    rwslib's ``SitesMetadataRequest`` is defined as::
+    rwslib's ``SitesMetadataRequest`` and ``StudySubjectsRequest`` are both
+    defined with separate ``project_name`` / ``environment_name`` parameters::
 
         SitesMetadataRequest(project_name=None, environment_name=None)
+        StudySubjectsRequest(project_name, environment_name)
 
     so the OID ``Mediflex(Dev)`` must be parsed into
     ``project_name="Mediflex"`` and ``environment_name="Dev"`` before use.
@@ -80,19 +82,6 @@ class RWSClient:
         odm_bytes: bytes,
         endpoint: str = "/RaveWebServices/webservice.aspx?PostODMClinicalData",
     ) -> str:
-        """
-        POST an ODM XML payload to Rave RWS.
-
-        Args:
-            odm_bytes: The serialised ODM XML from :meth:`RaveTransaction.build`.
-            endpoint:  RWS endpoint path (default: PostODMClinicalData).
-
-        Returns:
-            The raw RWS response body as a string (BOM-stripped).
-
-        Raises:
-            RWSError: On HTTP errors or RWS-level error responses.
-        """
         url = f"{self.base_url}{endpoint}"
         logger.debug("POST %s", url)
         try:
@@ -101,23 +90,13 @@ class RWSClient:
             raise RWSError(f"Request timed out after {self.timeout}s.")
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
-        logger.debug("Response HTTP %s — %d bytes", response.status_code, len(response.content))
+        logger.debug("Response HTTP %s \u2014 %d bytes", response.status_code, len(response.content))
         return self._handle_response(response)
 
     def get_studies_raw(
         self,
         endpoint: str = "/RaveWebServices/studies",
     ) -> str:
-        """
-        Retrieve the raw ODM XML listing of studies accessible to the
-        authenticated user.
-
-        Returns BOM-stripped XML so callers can pass directly to
-        ``ET.fromstring`` without a ``ParseError``.
-
-        Raises:
-            RWSError: On HTTP errors, auth failures, or network failures.
-        """
         url = f"{self.base_url}{endpoint}"
         logger.debug("GET %s", url)
         try:
@@ -127,7 +106,7 @@ class RWSClient:
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
         logger.debug(
-            "get_studies_raw: HTTP %s — %d bytes",
+            "get_studies_raw: HTTP %s \u2014 %d bytes",
             response.status_code,
             len(response.content),
         )
@@ -140,30 +119,21 @@ class RWSClient:
         """
         Retrieve the raw ODM XML listing of sites for a given study.
 
-        Mirrors ``rwslib.rws_requests.odm_adapter.SitesMetadataRequest``
-        which is defined as::
+        Mirrors ``rwslib.rws_requests.odm_adapter.SitesMetadataRequest``::
 
             SitesMetadataRequest(project_name=None, environment_name=None)
 
-        The ``study_oid`` (e.g. ``Mediflex(Dev)``) is first split into
-        ``project_name="Mediflex"`` and ``environment_name="Dev"`` via
-        :func:`_parse_study_oid`, then recombined as the ``studyoid``
-        query-string parameter.
+        Calls::
 
-        Returns:
-            BOM-stripped XML suitable for ``ET.fromstring``.
+            GET /RaveWebServices/datasets/Sites.odm/?studyoid={project}({env})
 
-        Raises:
-            RWSError: If the OID format is invalid, or on HTTP / network errors.
-
-        Reference:
-            https://rwslib.readthedocs.io/en/latest/classes.html
+        Ref: https://rwslib.readthedocs.io/en/latest/odm_adapter.html
         """
         project_name, environment_name = _parse_study_oid(study_oid)
         studyoid_param = f"{project_name}({environment_name})"
         url = f"{self.base_url}/RaveWebServices/datasets/Sites.odm/"
         logger.debug(
-            "get_sites_raw: project=%r env=%r → GET %s?studyoid=%s",
+            "get_sites_raw: project=%r env=%r \u2192 GET %s?studyoid=%s",
             project_name,
             environment_name,
             url,
@@ -180,7 +150,52 @@ class RWSClient:
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
         logger.debug(
-            "get_sites_raw (project=%r env=%r): HTTP %s — %d bytes",
+            "get_sites_raw (project=%r env=%r): HTTP %s \u2014 %d bytes",
+            project_name,
+            environment_name,
+            response.status_code,
+            len(response.content),
+        )
+        return self._handle_response(response)
+
+    def get_subjects_raw(
+        self,
+        study_oid: str,
+    ) -> str:
+        """
+        Retrieve the raw ODM XML listing of subjects for a given study.
+
+        Mirrors ``rwslib.rws_requests.StudySubjectsRequest``::
+
+            StudySubjectsRequest(project_name, environment_name)
+
+        Calls::
+
+            GET /RaveWebServices/studies/{project}({env})/subjects
+
+        Each ``<SubjectData>`` in the response carries a
+        ``<SiteRef LocationOID="..."/>`` child, enabling client-side
+        filtering to a specific site.
+
+        Returns:
+            BOM-stripped XML suitable for ``ET.fromstring``.
+
+        Raises:
+            RWSError: On HTTP errors, auth failures, or network failures.
+
+        Ref: https://rwslib.readthedocs.io/en/latest/retrieve_clinical_data.html
+        """
+        project_name, environment_name = _parse_study_oid(study_oid)
+        url = f"{self.base_url}/RaveWebServices/studies/{project_name}({environment_name})/subjects"
+        logger.debug("get_subjects_raw: project=%r env=%r \u2192 GET %s", project_name, environment_name, url)
+        try:
+            response = self._session.get(url, timeout=self.timeout)
+        except requests.exceptions.Timeout:
+            raise RWSError(f"Request timed out after {self.timeout}s.")
+        except requests.exceptions.ConnectionError as exc:
+            raise RWSError(f"Connection failed: {exc}")
+        logger.debug(
+            "get_subjects_raw (project=%r env=%r): HTTP %s \u2014 %d bytes",
             project_name,
             environment_name,
             response.status_code,
@@ -189,13 +204,6 @@ class RWSClient:
         return self._handle_response(response)
 
     def ping(self) -> bool:
-        """
-        Verify RWS connectivity by calling the version endpoint.
-
-        Returns ``True`` if the server responds with 200 or 401 (reachable
-        but credentials not yet validated). Returns ``False`` on any network
-        failure or if a login-page redirect is returned.
-        """
         try:
             url = f"{self.base_url}/RaveWebServices/webservice.aspx?GetVersion"
             r = self._session.get(url, timeout=self.timeout)
@@ -215,7 +223,7 @@ class RWSClient:
         if response.status_code == 200:
             if self._is_login_page(body):
                 raise RWSError(
-                    "Unauthorised — RWS redirected to the login page. "
+                    "Unauthorised \u2014 RWS redirected to the login page. "
                     "Check your username and password.",
                     http_status=401,
                 )
@@ -229,11 +237,11 @@ class RWSClient:
             return body
 
         rws_messages = {
-            400: "Bad Request — malformed ODM XML.",
-            401: "Unauthorised — check credentials.",
-            403: "Forbidden — insufficient RWS permissions.",
-            404: "Not Found — check study OID or endpoint URL.",
-            409: "Conflict — transaction violates study configuration.",
+            400: "Bad Request \u2014 malformed ODM XML.",
+            401: "Unauthorised \u2014 check credentials.",
+            403: "Forbidden \u2014 insufficient RWS permissions.",
+            404: "Not Found \u2014 check study OID or endpoint URL.",
+            409: "Conflict \u2014 transaction violates study configuration.",
         }
         message = rws_messages.get(
             response.status_code, f"Unexpected HTTP {response.status_code}."
@@ -243,7 +251,6 @@ class RWSClient:
 
     @staticmethod
     def _is_login_page(body: str) -> bool:
-        """Return True if the response body looks like the Rave HTML login page."""
         return any(marker in body for marker in _LOGIN_PAGE_MARKERS)
 
     @staticmethod

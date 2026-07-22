@@ -85,13 +85,6 @@ class RaveDiagnostics:
 
     @staticmethod
     def _strip_bom(text: str) -> str:
-        """Remove a leading UTF-8 BOM (\ufeff) if present.
-
-        RWS (innovate and production) prepends a BOM to every XML
-        response body. ``xml.etree.ElementTree.fromstring`` treats the
-        BOM as illegal leading content and raises ``ParseError``, which
-        causes all parsing methods to silently return empty lists.
-        """
         return text.lstrip("\ufeff")
 
     # ------------------------------------------------------------------
@@ -114,9 +107,7 @@ class RaveDiagnostics:
         try:
             root = ET.fromstring(RaveDiagnostics._strip_bom(body))
         except ET.ParseError as exc:
-            logger.warning(
-                "_parse_studies: failed to parse RWS studies XML: %s", exc
-            )
+            logger.warning("_parse_studies: failed to parse RWS studies XML: %s", exc)
             return studies
         for study in root.iter(f"{{{ODM_NS}}}Study"):
             oid = study.attrib.get("OID", "")
@@ -135,63 +126,134 @@ class RaveDiagnostics:
     # Site helpers
     # ------------------------------------------------------------------
 
-    def get_sites(self, study_oid: str) -> List[str]:
+    def get_sites(self, study_oid: str) -> List[Dict[str, str]]:
         """
-        Retrieve the list of site OIDs for a given study.
-
-        Delegates to ``client.get_sites_raw(study_oid)`` and parses
-        LocationOID attributes from the returned ODM XML.
-
-        RWS returns sites in one of three shapes depending on environment
-        and version:
-          1. ``<SiteRef LocationOID="..."/>`` under ClinicalData (most common)
-          2. ``<mdsol:Location OID="..."/>`` Medidata-namespaced element
-          3. ``<Location OID="..."/>`` ODM-namespaced or bare element
+        Retrieve sites for a given study.
 
         Returns:
-            A list of site OID strings.
+            A list of dicts: [{"oid": "...", "name": "..."}, ...]
+            ``name`` falls back to ``oid`` when the Location has no Name attribute.
         """
         body = self._client.get_sites_raw(study_oid)
-        return self._parse_site_oids(body)
+        return self._parse_sites(body)
 
     @staticmethod
-    def _parse_site_oids(body: str) -> List[str]:
-        site_oids: List[str] = []
+    def _parse_sites(body: str) -> List[Dict[str, str]]:
+        """
+        Parse ODM AdminData returned by SitesMetadataRequest.
+
+        The canonical shape from the docs is::
+
+            <AdminData>
+              <Location OID="MEDI0001" Name="Medidata" LocationType="Site" mdsol:Active="Yes">
+                ...
+              </Location>
+            </AdminData>
+
+        Returns [{"oid": "MEDI0001", "name": "Medidata"}, ...]
+        """
+        sites: List[Dict[str, str]] = []
+        seen: set = set()
         try:
             root = ET.fromstring(RaveDiagnostics._strip_bom(body))
         except ET.ParseError as exc:
-            logger.warning(
-                "_parse_site_oids: failed to parse RWS sites XML: %s", exc
-            )
-            return site_oids
+            logger.warning("_parse_sites: failed to parse RWS sites XML: %s", exc)
+            return sites
 
-        seen: set = set()
-
-        def _add(oid: str) -> None:
+        def _add(oid: str, name: str) -> None:
             if oid and oid not in seen:
                 seen.add(oid)
-                site_oids.append(oid)
+                sites.append({"oid": oid, "name": name or oid})
 
-        # Shape 1: <SiteRef LocationOID="..."/> — the most common RWS response
-        for ref in root.iter(f"{{{ODM_NS}}}SiteRef"):
-            _add(ref.attrib.get("LocationOID", ""))
-        # Also bare SiteRef (no namespace) for older/non-standard responses
-        for ref in root.iter("SiteRef"):
-            _add(ref.attrib.get("LocationOID", ""))
-
-        # Shape 2: Medidata-namespaced Location
-        for loc in root.iter(f"{{{MDSOL_NS}}}Location"):
-            _add(loc.attrib.get("OID", ""))
-
-        # Shape 3: ODM-namespaced Location
+        # Primary shape: ODM-namespaced <Location> from AdminData
         for loc in root.iter(f"{{{ODM_NS}}}Location"):
-            _add(loc.attrib.get("OID", ""))
+            _add(loc.attrib.get("OID", ""), loc.attrib.get("Name", ""))
 
-        # Shape 3b: bare Location (no namespace)
+        # Medidata-namespaced Location (older environments)
+        for loc in root.iter(f"{{{MDSOL_NS}}}Location"):
+            _add(loc.attrib.get("OID", ""), loc.attrib.get("Name", ""))
+
+        # Bare Location (no namespace)
         for loc in root.iter("Location"):
-            _add(loc.attrib.get("OID", ""))
+            _add(loc.attrib.get("OID", ""), loc.attrib.get("Name", ""))
 
-        return site_oids
+        # Fallback: SiteRef elements (clinical data shape)
+        for ref in root.iter(f"{{{ODM_NS}}}SiteRef"):
+            _add(ref.attrib.get("LocationOID", ""), "")
+        for ref in root.iter("SiteRef"):
+            _add(ref.attrib.get("LocationOID", ""), "")
+
+        return sites
+
+    # ------------------------------------------------------------------
+    # Subject helpers
+    # ------------------------------------------------------------------
+
+    def get_subjects(
+        self,
+        study_oid: str,
+        site_oid: Optional[str] = None,
+    ) -> List[str]:
+        """
+        Retrieve subject keys for a given study, optionally filtered to one site.
+
+        Calls ``StudySubjectsRequest(project_name, environment_name)``::
+
+            GET /RaveWebServices/studies/{project}({env})/subjects
+
+        Each ``<SubjectData>`` carries a ``<SiteRef LocationOID="..."/>``;
+        when ``site_oid`` is provided only subjects at that location are returned.
+
+        Args:
+            study_oid:  Full OID e.g. ``Mediflex(Dev)``.
+            site_oid:   Optional LocationOID to filter by.
+
+        Returns:
+            Sorted list of SubjectKey strings.
+
+        Ref: https://rwslib.readthedocs.io/en/latest/retrieve_clinical_data.html
+        """
+        body = self._client.get_subjects_raw(study_oid)
+        return self._parse_subject_keys(body, site_oid=site_oid)
+
+    @staticmethod
+    def _parse_subject_keys(
+        body: str,
+        site_oid: Optional[str] = None,
+    ) -> List[str]:
+        subjects: List[str] = []
+        try:
+            root = ET.fromstring(RaveDiagnostics._strip_bom(body))
+        except ET.ParseError as exc:
+            logger.warning("_parse_subject_keys: failed to parse XML: %s", exc)
+            return subjects
+
+        for subj in root.iter(f"{{{ODM_NS}}}SubjectData"):
+            if site_oid is not None:
+                site_ref = subj.find(f"{{{ODM_NS}}}SiteRef")
+                if site_ref is None:
+                    site_ref = subj.find("SiteRef")
+                if site_ref is None:
+                    continue
+                if site_ref.attrib.get("LocationOID", "") != site_oid:
+                    continue
+            key = subj.attrib.get("SubjectKey", "")
+            if key:
+                subjects.append(key)
+
+        # Also handle bare SubjectData (no namespace)
+        for subj in root.iter("SubjectData"):
+            if site_oid is not None:
+                site_ref = subj.find("SiteRef")
+                if site_ref is None:
+                    continue
+                if site_ref.attrib.get("LocationOID", "") != site_oid:
+                    continue
+            key = subj.attrib.get("SubjectKey", "")
+            if key and key not in subjects:
+                subjects.append(key)
+
+        return sorted(subjects)
 
     # ------------------------------------------------------------------
     # Shared utilities
@@ -422,7 +484,8 @@ class RaveDiagnostics:
             )
 
         try:
-            site_oids = self.get_sites(study_oid)
+            sites = self.get_sites(study_oid)
+            site_oids = [s["oid"] for s in sites]
         except Exception:
             return DiagnosticReport(
                 category="site_not_found",
@@ -476,13 +539,6 @@ class RaveDiagnostics:
         study_oid: str,
         subject_keys: List[str],
     ) -> DiagnosticReport:
-        """
-        Provide guidance when RWS reports a subject-not-found error.
-
-        RWS does not expose a subject list endpoint, so this method cannot
-        perform fuzzy matching. Instead it returns the subject key(s) from
-        the transaction and actionable advice.
-        """
         return DiagnosticReport(
             category="subject_not_found",
             severity="error",
@@ -505,7 +561,6 @@ class RaveDiagnostics:
 
     @staticmethod
     def _extract_site_oid(transaction: "RaveTransaction") -> Optional[str]:
-        """Return the first SiteOID found across all subjects, or None."""
         for subj_data in transaction._subjects.values():
             site = subj_data.get("SiteOID")
             if site:
@@ -514,5 +569,4 @@ class RaveDiagnostics:
 
     @staticmethod
     def _extract_subject_keys(transaction: "RaveTransaction") -> List[str]:
-        """Return all subject keys present in the transaction."""
         return list(transaction._subjects.keys())
