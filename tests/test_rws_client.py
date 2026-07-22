@@ -11,6 +11,7 @@ def make_mock_response(status_code=200, text="<Response>Success</Response>"):
     response = Mock(spec=requests.Response)
     response.status_code = status_code
     response.text = text
+    response.content = text.encode("utf-8") if isinstance(text, str) else text
     return response
 
 

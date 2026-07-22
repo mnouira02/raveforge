@@ -185,6 +185,20 @@ class RaveDiagnostics:
 
         return sites
 
+    @staticmethod
+    def _parse_site_oids(body: str) -> List[str]:
+        """
+        Return a deduplicated list of site OID strings from any RWS site XML shape.
+
+        Handles three response shapes:
+        - AdminData with ODM-namespaced ``<Location OID="...">``
+        - ClinicalData with ``<SiteRef LocationOID="...">``
+        - Legacy bare ``<Location OID="...">`` (no namespace)
+
+        Returns an empty list on malformed XML rather than raising.
+        """
+        return [s["oid"] for s in RaveDiagnostics._parse_sites(body)]
+
     # ------------------------------------------------------------------
     # Subject helpers
     # ------------------------------------------------------------------

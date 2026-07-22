@@ -102,7 +102,7 @@ class RaveTransaction:
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
         """Add or switch to a study event context."""
-        if not self._current_subject:
+        if self._current_subject is None:
             raise HierarchyError("Subject context required before calling event().")
         effective_repeat_key = (
             repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
@@ -128,7 +128,7 @@ class RaveTransaction:
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
         """Add or switch to a form context."""
-        if not self._current_event:
+        if self._current_event is None:
             raise HierarchyError("Event context required before calling form().")
         effective_repeat_key = (
             repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
@@ -157,7 +157,7 @@ class RaveTransaction:
         specified_items_only: bool = False,
     ) -> RaveTransaction:
         """Add or switch to an item group context."""
-        if not self._current_form:
+        if self._current_form is None:
             raise HierarchyError("Form context required before calling item_group().")
         effective_repeat_key = (
             repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
@@ -199,7 +199,7 @@ class RaveTransaction:
             query_status:    Status of the query (default: Open).
             query_recipient: Recipient of the query (default: Site from System).
         """
-        if not self._current_group:
+        if self._current_group is None:
             raise HierarchyError("ItemGroup context required before calling item().")
         items = (
             self._subjects[self._current_subject]
