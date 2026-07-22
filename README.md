@@ -225,7 +225,7 @@ Requested:
 
 Evidence:
   accessible_study_count: 4
-  suggested_matches: [{'value': 'Mediflex_DEV', 'similarity': 0.95}]
+  close_matches: [{'value': 'Mediflex_DEV', 'similarity': 0.95}]
 
 Recommendation:
   Confirm the intended environment and use the exact StudyOID
