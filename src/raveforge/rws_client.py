@@ -19,6 +19,11 @@ _LOGIN_PAGE_MARKERS = (
     "Medidata Classic Rave",
 )
 
+# Trailing environment qualifiers that Rave appends to study OIDs.
+# The RWS /studies/{name}/sites endpoint expects the bare study name
+# *without* this suffix.
+_ENV_SUFFIX_RE = re.compile(r"\([^)]+\)$")
+
 logger = logging.getLogger(__name__)
 
 
@@ -118,11 +123,17 @@ class RWSClient:
         """
         Retrieve the raw XML listing of sites for a given study.
 
-        Study OIDs such as ``Mediflex(Dev)`` contain characters that are
-        not valid in a URL path segment without encoding.  The OID is
-        percent-encoded with :func:`urllib.parse.quote` before being
-        interpolated into the path so that ``Mediflex(Dev)`` becomes
-        ``Mediflex%28Dev%29``.
+        The RWS ``/studies/{name}/sites`` endpoint expects the bare study
+        *name* — the protocol name without the environment qualifier that
+        Rave appends to the OID.  For example, the OID ``Mediflex(Dev)``
+        maps to the endpoint segment ``Mediflex``.
+
+        Strategy:
+          1. Strip the trailing ``(...)`` environment suffix from the OID.
+          2. Percent-encode the result and make the request.
+          3. If RWS still returns 404, fall back to the full percent-encoded
+             OID so the caller receives a real :class:`RWSError` rather than
+             a silent empty list.
 
         Returns BOM-stripped XML so callers can pass directly to
         ``ET.fromstring`` without a ``ParseError``.
@@ -130,20 +141,54 @@ class RWSClient:
         Raises:
             RWSError: On HTTP errors, auth failures, or network failures.
         """
-        encoded_oid = quote(study_oid, safe="")
-        url = f"{self.base_url}/RaveWebServices/studies/{encoded_oid}/sites"
-        logger.debug("GET %s", url)
+        # Derive the study name by stripping the environment suffix.
+        # Mediflex(Dev) -> Mediflex,  ACME_Study(UAT) -> ACME_Study
+        study_name = _ENV_SUFFIX_RE.sub("", study_oid).strip()
+        if not study_name:
+            # OID had no recognisable suffix — use it as-is.
+            study_name = study_oid
+
+        encoded_name = quote(study_name, safe="")
+        url = f"{self.base_url}/RaveWebServices/studies/{encoded_name}/sites"
+        logger.debug("GET %s  (derived from OID %r)", url, study_oid)
         try:
             response = self._session.get(url, timeout=self.timeout)
         except requests.exceptions.Timeout:
             raise RWSError(f"Request timed out after {self.timeout}s.")
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
+
         logger.debug(
-            "get_sites_raw: HTTP %s — %d bytes",
+            "get_sites_raw (name=%r): HTTP %s — %d bytes",
+            study_name,
             response.status_code,
             len(response.content),
         )
+
+        # If the stripped name produced a 404, retry with the full OID in case
+        # this environment does not use the (Env) suffix convention.
+        if response.status_code == 404 and study_name != study_oid:
+            encoded_oid = quote(study_oid, safe="")
+            fallback_url = (
+                f"{self.base_url}/RaveWebServices/studies/{encoded_oid}/sites"
+            )
+            logger.debug(
+                "get_sites_raw: name-based URL returned 404; retrying with full OID: %s",
+                fallback_url,
+            )
+            try:
+                response = self._session.get(fallback_url, timeout=self.timeout)
+            except requests.exceptions.Timeout:
+                raise RWSError(f"Request timed out after {self.timeout}s.")
+            except requests.exceptions.ConnectionError as exc:
+                raise RWSError(f"Connection failed: {exc}")
+            logger.debug(
+                "get_sites_raw (oid=%r): HTTP %s — %d bytes",
+                study_oid,
+                response.status_code,
+                len(response.content),
+            )
+
         return self._handle_response(response)
 
     def ping(self) -> bool:
