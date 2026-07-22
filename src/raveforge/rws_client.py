@@ -104,10 +104,10 @@ class RWSClient:
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
         logger.debug(
-            "get_studies_raw: HTTP %s — %d bytes — body[:200]: %r",
+            "get_studies_raw: HTTP %s — %d bytes — full body:\n%s",
             response.status_code,
             len(response.text),
-            response.text[:200],
+            response.text,
         )
         return self._handle_response(response)
 
@@ -135,10 +135,10 @@ class RWSClient:
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
         logger.debug(
-            "get_sites_raw: HTTP %s — %d bytes — body[:200]: %r",
+            "get_sites_raw: HTTP %s — %d bytes — full body:\n%s",
             response.status_code,
             len(response.text),
-            response.text[:200],
+            response.text,
         )
         return self._handle_response(response)
 
