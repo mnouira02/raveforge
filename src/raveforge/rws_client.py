@@ -78,7 +78,7 @@ class RWSClient:
             raise RWSError(f"Request timed out after {self.timeout}s.")
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
-        logger.debug("Response HTTP %s — %d bytes", response.status_code, len(response.text))
+        logger.debug("Response HTTP %s — %d bytes", response.status_code, len(response.content))
         return self._handle_response(response)
 
     def get_studies_raw(
@@ -104,10 +104,9 @@ class RWSClient:
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
         logger.debug(
-            "get_studies_raw: HTTP %s — %d bytes — full body:\n%s",
+            "get_studies_raw: HTTP %s — %d bytes",
             response.status_code,
-            len(response.text),
-            response.text,
+            len(response.content),
         )
         return self._handle_response(response)
 
@@ -135,10 +134,9 @@ class RWSClient:
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
         logger.debug(
-            "get_sites_raw: HTTP %s — %d bytes — full body:\n%s",
+            "get_sites_raw: HTTP %s — %d bytes",
             response.status_code,
-            len(response.text),
-            response.text,
+            len(response.content),
         )
         return self._handle_response(response)
 
@@ -156,17 +154,26 @@ class RWSClient:
             if r.status_code == 401:
                 return True
             if r.status_code == 200:
+                r.encoding = "utf-8-sig"
                 return not self._is_login_page(r.text)
             return False
         except requests.exceptions.RequestException:
             return False
 
     def _handle_response(self, response: requests.Response) -> str:
-        # RWS prepends a UTF-8 BOM (\xef\xbb\xbf / \ufeff) to every XML
-        # response body. requests preserves it in response.text, and
-        # ET.fromstring() rejects it with ParseError. Strip it here once
-        # so every caller receives clean, parseable XML.
-        body = response.text.lstrip("\ufeff")
+        # RWS always prepends a UTF-8 BOM (0xEF 0xBB 0xBF) to every XML
+        # response body.  When the HTTP Content-Type header omits a charset
+        # (or specifies something other than utf-8), requests auto-detects the
+        # encoding as latin-1 and decodes the 3-byte BOM into the three
+        # characters ï»¿ rather than the single unicode character \ufeff.
+        # A subsequent lstrip("\ufeff") then does nothing, and ET.fromstring()
+        # raises ParseError: not well-formed (invalid token).
+        #
+        # Forcing utf-8-sig — Python's codec that decodes UTF-8 *and* strips
+        # the BOM atomically — makes BOM removal unconditional and independent
+        # of whatever encoding the HTTP headers advertise.
+        response.encoding = "utf-8-sig"
+        body = response.text
 
         if response.status_code == 200:
             # Rave sometimes returns a 200 with the HTML login page when
