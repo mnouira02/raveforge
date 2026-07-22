@@ -32,7 +32,7 @@ SAMPLE_STUDIES_XML_WITH_BOM = "\ufeff" + SAMPLE_STUDIES_XML
 SAMPLE_SITES_XML_SITEREF = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
     '<ODM xmlns="http://www.cdisc.org/ns/odm/v1.3"'
-    ' xmlns:mdsol="http://www.mdsol.com/ns/odm/metadata">\'\n'
+    ' xmlns:mdsol="http://www.mdsol.com/ns/odm/metadata">\n'
     '  <ClinicalData StudyOID="Mediflex_01" MetaDataVersionOID="1">\n'
     '    <SubjectData SubjectKey="dummy">\n'
     '      <SiteRef LocationOID="SITE-001" />\n'

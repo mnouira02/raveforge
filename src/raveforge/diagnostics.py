@@ -35,30 +35,40 @@ class DiagnosticReport:
     recommendation: str = ""
     safe_to_retry: bool = False
 
+    # Human-readable category titles
+    _TITLES: Dict[str, str] = field(
+        default_factory=lambda: {
+            "authentication_failed": "Authentication Failed",
+            "authorization_failed": "Authorization Failed",
+            "conflict": "Transaction Conflict",
+            "server_error": "Server Error",
+            "study_not_found": "Study Not Found",
+            "site_not_found": "Site Not Found",
+            "subject_not_found": "Subject Not Found",
+            "not_found": "Resource Not Found",
+            "unrecognized_error": "Unrecognized Error",
+        },
+        repr=False,
+        compare=False,
+    )
+
     def format_human_readable(self) -> str:
+        """Return a multi-line diagnostic summary suitable for logging or display."""
+        title = self._TITLES.get(self.category, self.category.replace("_", " ").title())
         lines = [
-            f"[{self.severity.upper()}] "
-            f"{self.category.replace('_', ' ').title()}"
+            f"[{self.severity.upper()}] {title}",
+            "-" * 60,
         ]
-
         if self.requested:
-            lines.append("")
             lines.append("Requested:")
-            for key, value in self.requested.items():
-                lines.append(f"  {key}: {value}")
-
+            for k, v in self.requested.items():
+                lines.append(f"  {k}: {v}")
         if self.evidence:
-            lines.append("")
             lines.append("Evidence:")
-            for key, value in self.evidence.items():
-                lines.append(f"  {key}: {value}")
-
+            for k, v in self.evidence.items():
+                lines.append(f"  {k}: {v}")
         if self.recommendation:
-            lines.append("")
-            lines.append("Recommendation:")
-            lines.append(f"  {self.recommendation}")
-
-        lines.append("")
+            lines.append(f"Recommendation: {self.recommendation}")
         lines.append(f"Safe to retry automatically: {self.safe_to_retry}")
         return "\n".join(lines)
 
@@ -68,24 +78,14 @@ class DiagnosticReport:
 
 class RaveDiagnostics:
     """
-    Read-only diagnostic layer for RaveForge.
+    Post-submission diagnostics for Medidata Rave Web Services errors.
 
-    Interprets RWS submission failures and returns evidence-based
-    suggestions via targeted, read-only RWS GET calls. Never modifies
-    the caller's transaction or automatically selects a study, site,
-    or subject on their behalf.
+    Accepts the same client interface as ``RWSClient`` so it can be
+    constructed with a mock in tests.
     """
 
     def __init__(self, client: Any) -> None:
         self._client = client
-
-    # ------------------------------------------------------------------
-    # Internal utilities
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _strip_bom(text: str) -> str:
-        return text.lstrip("\ufeff")
 
     # ------------------------------------------------------------------
     # Study helpers
@@ -93,32 +93,34 @@ class RaveDiagnostics:
 
     def get_studies(self) -> List[Dict[str, str]]:
         """
-        Retrieve the list of studies accessible to the authenticated user.
+        Return a list of ``{oid, name}`` dicts for every study accessible
+        to the authenticated user.
 
-        Returns:
-            A list of dicts: [{"oid": "...", "name": "..."}, ...]
+        Returns an empty list if the XML cannot be parsed.
         """
-        body = self._client.get_studies_raw()
-        return self._parse_studies(body)
+        try:
+            raw = self._client.get_studies_raw()
+        except RWSError:
+            return []
+        return self._parse_studies(raw)
 
     @staticmethod
-    def _parse_studies(body: str) -> List[Dict[str, str]]:
-        studies: List[Dict[str, str]] = []
+    def _parse_studies(xml_text: str) -> List[Dict[str, str]]:
+        """Parse an ODM studies response into a list of {oid, name} dicts."""
+        xml_text = xml_text.lstrip("\ufeff")  # strip BOM
         try:
-            root = ET.fromstring(RaveDiagnostics._strip_bom(body))
-        except ET.ParseError as exc:
-            logger.warning("_parse_studies: failed to parse RWS studies XML: %s", exc)
-            return studies
-        for study in root.iter(f"{{{ODM_NS}}}Study"):
-            oid = study.attrib.get("OID", "")
-            name_node = study.find(
+            root = ET.fromstring(xml_text)
+        except ET.ParseError:
+            logger.warning("_parse_studies: failed to parse XML")
+            return []
+
+        studies = []
+        for study_el in root.findall(f"{{{ODM_NS}}}Study"):
+            oid = study_el.get("OID", "")
+            name_el = study_el.find(
                 f"{{{ODM_NS}}}GlobalVariables/{{{ODM_NS}}}StudyName"
             )
-            name = (
-                name_node.text
-                if name_node is not None and name_node.text
-                else oid
-            )
+            name = name_el.text if (name_el is not None and name_el.text) else oid
             studies.append({"oid": oid, "name": name})
         return studies
 
@@ -126,192 +128,98 @@ class RaveDiagnostics:
     # Site helpers
     # ------------------------------------------------------------------
 
-    def get_sites(self, study_oid: str) -> List[Dict[str, str]]:
+    def get_sites(self, study_oid: str) -> List[str]:
         """
-        Retrieve sites for a given study.
+        Return a deduplicated list of site OIDs for the given study.
 
-        Returns:
-            A list of dicts: [{"oid": "...", "name": "..."}, ...]
-            ``name`` falls back to ``oid`` when the Location has no Name attribute.
+        Returns an empty list on any error.
         """
-        body = self._client.get_sites_raw(study_oid)
-        return self._parse_sites(body)
-
-    @staticmethod
-    def _parse_sites(body: str) -> List[Dict[str, str]]:
-        """
-        Parse ODM AdminData returned by SitesMetadataRequest.
-
-        The canonical shape from the docs is::
-
-            <AdminData>
-              <Location OID="MEDI0001" Name="Medidata" LocationType="Site" mdsol:Active="Yes">
-                ...
-              </Location>
-            </AdminData>
-
-        Returns [{"oid": "MEDI0001", "name": "Medidata"}, ...]
-        """
-        sites: List[Dict[str, str]] = []
-        seen: set = set()
         try:
-            root = ET.fromstring(RaveDiagnostics._strip_bom(body))
-        except ET.ParseError as exc:
-            logger.warning("_parse_sites: failed to parse RWS sites XML: %s", exc)
-            return sites
-
-        def _add(oid: str, name: str) -> None:
-            if oid and oid not in seen:
-                seen.add(oid)
-                sites.append({"oid": oid, "name": name or oid})
-
-        # Primary shape: ODM-namespaced <Location> from AdminData
-        for loc in root.iter(f"{{{ODM_NS}}}Location"):
-            _add(loc.attrib.get("OID", ""), loc.attrib.get("Name", ""))
-
-        # Medidata-namespaced Location (older environments)
-        for loc in root.iter(f"{{{MDSOL_NS}}}Location"):
-            _add(loc.attrib.get("OID", ""), loc.attrib.get("Name", ""))
-
-        # Bare Location (no namespace)
-        for loc in root.iter("Location"):
-            _add(loc.attrib.get("OID", ""), loc.attrib.get("Name", ""))
-
-        # Fallback: SiteRef elements (clinical data shape)
-        for ref in root.iter(f"{{{ODM_NS}}}SiteRef"):
-            _add(ref.attrib.get("LocationOID", ""), "")
-        for ref in root.iter("SiteRef"):
-            _add(ref.attrib.get("LocationOID", ""), "")
-
-        return sites
+            raw = self._client.get_sites_raw(study_oid)
+        except RWSError:
+            return []
+        return self._parse_site_oids(raw)
 
     @staticmethod
-    def _parse_site_oids(body: str) -> List[str]:
+    def _parse_site_oids(xml_text: str) -> List[str]:
         """
-        Return a deduplicated list of site OID strings from any RWS site XML shape.
+        Parse site OIDs from an ODM XML string.
 
-        Handles three response shapes:
-        - AdminData with ODM-namespaced ``<Location OID="...">``
-        - ClinicalData with ``<SiteRef LocationOID="...">``
-        - Legacy bare ``<Location OID="...">`` (no namespace)
+        Handles two real RWS response shapes:
 
-        Returns an empty list on malformed XML rather than raising.
+        1. Legacy ``<Location OID="..."/>`` elements anywhere in the document.
+        2. Modern ``<SiteRef LocationOID="..."/>`` elements (under ClinicalData
+           or elsewhere in the document).
+
+        Duplicate OIDs are removed; the result order is deterministic
+        (insertion order via ``dict.fromkeys``).
+
+        Returns an empty list if the XML cannot be parsed.
         """
-        return [s["oid"] for s in RaveDiagnostics._parse_sites(body)]
-
-    # ------------------------------------------------------------------
-    # Subject helpers
-    # ------------------------------------------------------------------
-
-    def get_subjects(
-        self,
-        study_oid: str,
-        site_oid: Optional[str] = None,
-    ) -> List[str]:
-        """
-        Retrieve subject keys for a given study, optionally filtered to one site.
-
-        Calls ``StudySubjectsRequest(project_name, environment_name)``::
-
-            GET /RaveWebServices/studies/{project}({env})/subjects
-
-        Each ``<SubjectData>`` carries a ``<SiteRef LocationOID="..."/>``;
-        when ``site_oid`` is provided only subjects at that location are returned.
-
-        Args:
-            study_oid:  Full OID e.g. ``Mediflex(Dev)``.
-            site_oid:   Optional LocationOID to filter by.
-
-        Returns:
-            Sorted list of SubjectKey strings.
-
-        Ref: https://rwslib.readthedocs.io/en/latest/retrieve_clinical_data.html
-        """
-        body = self._client.get_subjects_raw(study_oid)
-        return self._parse_subject_keys(body, site_oid=site_oid)
-
-    @staticmethod
-    def _parse_subject_keys(
-        body: str,
-        site_oid: Optional[str] = None,
-    ) -> List[str]:
-        subjects: List[str] = []
+        xml_text = xml_text.lstrip("\ufeff")
         try:
-            root = ET.fromstring(RaveDiagnostics._strip_bom(body))
-        except ET.ParseError as exc:
-            logger.warning("_parse_subject_keys: failed to parse XML: %s", exc)
-            return subjects
-
-        for subj in root.iter(f"{{{ODM_NS}}}SubjectData"):
-            if site_oid is not None:
-                site_ref = subj.find(f"{{{ODM_NS}}}SiteRef")
-                if site_ref is None:
-                    site_ref = subj.find("SiteRef")
-                if site_ref is None:
-                    continue
-                if site_ref.attrib.get("LocationOID", "") != site_oid:
-                    continue
-            key = subj.attrib.get("SubjectKey", "")
-            if key:
-                subjects.append(key)
-
-        # Also handle bare SubjectData (no namespace)
-        for subj in root.iter("SubjectData"):
-            if site_oid is not None:
-                site_ref = subj.find("SiteRef")
-                if site_ref is None:
-                    continue
-                if site_ref.attrib.get("LocationOID", "") != site_oid:
-                    continue
-            key = subj.attrib.get("SubjectKey", "")
-            if key and key not in subjects:
-                subjects.append(key)
-
-        return sorted(subjects)
-
-    # ------------------------------------------------------------------
-    # Shared utilities
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _normalize(value: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
-
-    def _find_close_matches(
-        self,
-        target: str,
-        candidates: List[str],
-        threshold: float = _MATCH_THRESHOLD,
-        limit: int = 3,
-    ) -> List[Dict[str, Any]]:
-        if not target or not candidates:
+            root = ET.fromstring(xml_text)
+        except ET.ParseError:
+            logger.warning("_parse_site_oids: failed to parse XML")
             return []
 
-        normalized_target = self._normalize(target)
-        matches = []
+        seen: dict = {}
 
-        for candidate in candidates:
-            normalized_candidate = self._normalize(candidate)
-            if normalized_candidate == normalized_target:
-                matches.append({"value": candidate, "similarity": 1.0})
-                continue
-            ratio = difflib.SequenceMatcher(
-                None, normalized_target, normalized_candidate
-            ).ratio()
-            if ratio >= threshold:
-                matches.append({"value": candidate, "similarity": round(ratio, 2)})
+        # Shape 1 — legacy: <Location OID="..." /> (with or without ODM namespace)
+        for el in root.iter(f"{{{ODM_NS}}}Location"):
+            oid = el.get("OID")
+            if oid:
+                seen[oid] = None
+        # Also try without namespace (some older responses omit it)
+        for el in root.iter("Location"):
+            oid = el.get("OID")
+            if oid:
+                seen[oid] = None
 
-        matches.sort(key=lambda m: m["similarity"], reverse=True)
-        return matches[:limit]
+        # Shape 2 — modern: <SiteRef LocationOID="..." /> anywhere
+        for el in root.iter(f"{{{ODM_NS}}}SiteRef"):
+            oid = el.get("LocationOID")
+            if oid:
+                seen[oid] = None
+        for el in root.iter("SiteRef"):
+            oid = el.get("LocationOID")
+            if oid:
+                seen[oid] = None
+
+        return list(seen.keys())
 
     # ------------------------------------------------------------------
-    # Error categorisation
+    # Error classification
     # ------------------------------------------------------------------
 
     @staticmethod
     def categorize_error(error: RWSError) -> str:
+        """
+        Map an ``RWSError`` to a stable category string.
+
+        Categories
+        ----------
+        ``authentication_failed``
+            HTTP 401 — credentials rejected.
+        ``authorization_failed``
+            HTTP 403 — authenticated but not permitted.
+        ``conflict``
+            HTTP 409 — transaction violates study configuration.
+        ``server_error``
+            HTTP 5xx — Rave-side error, usually transient.
+        ``study_not_found``
+            HTTP 404 with a message indicating the study OID was rejected.
+        ``site_not_found``
+            HTTP 404 with a message indicating an invalid LocationOID.
+        ``subject_not_found``
+            HTTP 404 with a message indicating a subject lookup failed.
+        ``not_found``
+            HTTP 404 that does not match a more specific sub-category.
+        ``unrecognized_error``
+            Any status code not handled above.
+        """
         status = error.http_status
-        message = str(error).lower()
+        msg = str(error).lower()
 
         if status == 401:
             return "authentication_failed"
@@ -321,266 +229,263 @@ class RaveDiagnostics:
             return "conflict"
         if status is not None and status >= 500:
             return "server_error"
-
-        if "subject" in message and ("not found" in message or "invalid" in message):
-            return "subject_not_found"
-        if "site" in message and ("not found" in message or "invalid" in message):
-            return "site_not_found"
-        if "study" in message and ("not found" in message or "invalid" in message):
-            return "study_not_found"
         if status == 404:
+            if "study" in msg:
+                return "study_not_found"
+            if "site" in msg or "location" in msg:
+                return "site_not_found"
+            if "subject" in msg:
+                return "subject_not_found"
             return "not_found"
-
-        return "unknown"
+        return "unrecognized_error"
 
     # ------------------------------------------------------------------
-    # Public entry point
+    # Top-level diagnosis
     # ------------------------------------------------------------------
 
     def explain_submission_failure(
         self,
         error: RWSError,
-        transaction: Optional["RaveTransaction"] = None,
-        include_subject_location: bool = False,
+        transaction: Optional[RaveTransaction] = None,
     ) -> DiagnosticReport:
+        """
+        Analyse a submission failure and return a structured
+        ``DiagnosticReport``.
+
+        Parameters
+        ----------
+        error:
+            The ``RWSError`` raised by :meth:`RWSClient.post_odm`.
+        transaction:
+            The ``RaveTransaction`` that was submitted. When provided,
+            extra fields (study OID, site OIDs, subject keys) are included
+            in the report.
+
+        Returns
+        -------
+        DiagnosticReport
+            A structured report. RaveForge never automatically applies any
+            suggestion contained in the report.
+        """
         category = self.categorize_error(error)
+        dispatch = {
+            "authentication_failed": self._report_auth,
+            "authorization_failed": self._report_authz,
+            "conflict": self._report_conflict,
+            "server_error": self._report_server_error,
+            "study_not_found": self._report_study_not_found,
+            "site_not_found": self._report_site_not_found,
+            "subject_not_found": self._report_subject_not_found,
+        }
+        handler = dispatch.get(category)
+        if handler:
+            return handler(error, transaction)
+        return self._report_unrecognized(error, transaction)
 
-        if category == "authentication_failed":
-            return DiagnosticReport(
-                category=category,
-                severity="error",
-                evidence={"http_status": error.http_status},
-                recommendation=(
-                    "Verify the username and password used to authenticate with RWS."
-                ),
-                safe_to_retry=False,
-            )
+    # ------------------------------------------------------------------
+    # Per-category report builders
+    # ------------------------------------------------------------------
 
-        if category == "authorization_failed":
-            return DiagnosticReport(
-                category=category,
-                severity="error",
-                evidence={"http_status": error.http_status},
-                recommendation=(
-                    "The authenticated user does not have sufficient permissions "
-                    "for this study or operation. Diagnostics were not expanded "
-                    "to avoid probing inaccessible resources."
-                ),
-                safe_to_retry=False,
-            )
-
-        if category == "conflict":
-            return DiagnosticReport(
-                category=category,
-                severity="error",
-                evidence={"http_status": error.http_status},
-                recommendation=(
-                    "RWS reported a data conflict. "
-                    "Check for duplicate subject keys or concurrent edits."
-                ),
-                safe_to_retry=False,
-            )
-
-        if category == "server_error":
-            return DiagnosticReport(
-                category=category,
-                severity="error",
-                evidence={"http_status": error.http_status},
-                recommendation=(
-                    "RWS returned a server error. "
-                    "Retry later or contact Medidata support."
-                ),
-                safe_to_retry=True,
-            )
-
-        if category == "study_not_found" and transaction is not None:
-            return self._diagnose_study_not_found(transaction.study_oid)
-
-        if category == "site_not_found" and transaction is not None:
-            return self._diagnose_site_not_found(
-                transaction.study_oid,
-                self._extract_site_oid(transaction),
-            )
-
-        if category == "subject_not_found" and transaction is not None:
-            return self._diagnose_subject_not_found(
-                transaction.study_oid,
-                self._extract_subject_keys(transaction),
-            )
-
+    @staticmethod
+    def _report_auth(
+        error: RWSError,
+        transaction: Optional[RaveTransaction],
+    ) -> DiagnosticReport:
         return DiagnosticReport(
-            category=category if category != "unknown" else "unrecognized_error",
+            category="authentication_failed",
             severity="error",
-            evidence={
-                "http_status": error.http_status,
-                "rws_code": error.rws_code,
-                "message": str(error),
-            },
+            evidence={"http_status": error.http_status},
             recommendation=(
-                "Review the RWS error details above for the specific cause."
+                "Verify the username and password supplied to RWSClient. "
+                "Ensure the account is not locked in Rave."
             ),
             safe_to_retry=False,
         )
 
-    # ------------------------------------------------------------------
-    # Private diagnostic methods
-    # ------------------------------------------------------------------
+    @staticmethod
+    def _report_authz(
+        error: RWSError,
+        transaction: Optional[RaveTransaction],
+    ) -> DiagnosticReport:
+        return DiagnosticReport(
+            category="authorization_failed",
+            severity="error",
+            evidence={"http_status": error.http_status},
+            recommendation=(
+                "The authenticated user lacks the necessary RWS permissions. "
+                "Contact your Rave administrator to review role assignments."
+            ),
+            safe_to_retry=False,
+        )
 
-    def _diagnose_study_not_found(self, requested_study_oid: str) -> DiagnosticReport:
-        try:
-            studies = self.get_studies()
-        except Exception:
-            return DiagnosticReport(
-                category="study_not_found",
-                severity="error",
-                requested={"study_oid": requested_study_oid},
-                evidence={"accessible_study_count": None},
-                recommendation=(
-                    "Could not retrieve the accessible study list to compare. "
-                    "Verify the StudyOID matches the exact configuration in Rave."
-                ),
-                safe_to_retry=False,
-            )
+    @staticmethod
+    def _report_conflict(
+        error: RWSError,
+        transaction: Optional[RaveTransaction],
+    ) -> DiagnosticReport:
+        evidence: Dict[str, Any] = {"http_status": error.http_status}
+        if error.rws_code:
+            evidence["rws_code"] = error.rws_code
+        return DiagnosticReport(
+            category="conflict",
+            severity="error",
+            evidence=evidence,
+            recommendation=(
+                "The transaction conflicts with the current study configuration. "
+                "Review the RWS error code and the study's edit checks or data rules."
+            ),
+            safe_to_retry=False,
+        )
 
-        study_oids = [s["oid"] for s in studies]
+    @staticmethod
+    def _report_server_error(
+        error: RWSError,
+        transaction: Optional[RaveTransaction],
+    ) -> DiagnosticReport:
+        return DiagnosticReport(
+            category="server_error",
+            severity="error",
+            evidence={"http_status": error.http_status},
+            recommendation=(
+                "This is a server-side error and may be transient. "
+                "Retry the submission after a short delay. "
+                "If the error persists, contact Medidata support."
+            ),
+            safe_to_retry=True,
+        )
 
-        if requested_study_oid in study_oids:
-            return DiagnosticReport(
-                category="study_not_found",
-                severity="warning",
-                requested={"study_oid": requested_study_oid},
-                evidence={
-                    "accessible_study_count": len(studies),
-                    "close_matches": [
-                        {"value": requested_study_oid, "similarity": 1.0}
-                    ],
-                },
-                recommendation=(
-                    "The StudyOID exists in your accessible study list, so the "
-                    "failure may be caused by metadata version, permissions, or "
-                    "environment mismatch rather than the study identifier itself."
-                ),
-                safe_to_retry=False,
-            )
-
-        suggestions = self._find_close_matches(requested_study_oid, study_oids)
-
+    def _report_study_not_found(
+        self,
+        error: RWSError,
+        transaction: Optional[RaveTransaction],
+    ) -> DiagnosticReport:
+        study_oid = getattr(transaction, "study_oid", "") if transaction else ""
+        studies = self.get_studies()
+        known_oids = [s["oid"] for s in studies]
+        close_matches = self._close_matches(study_oid, known_oids)
         return DiagnosticReport(
             category="study_not_found",
             severity="error",
-            requested={"study_oid": requested_study_oid},
+            requested={"study_oid": study_oid},
             evidence={
                 "accessible_study_count": len(studies),
-                "close_matches": suggestions,
+                "close_matches": close_matches,
             },
             recommendation=(
-                "Confirm the intended environment and use the exact StudyOID "
-                "configured in Rave. No payload was changed automatically."
+                "Confirm the exact StudyOID using RaveDiagnostics.get_studies(). "
+                "OIDs are case-sensitive and must include the environment suffix, "
+                'e.g. \'Mediflex(Dev)\'.',
             ),
             safe_to_retry=False,
         )
 
-    def _diagnose_site_not_found(
+    def _report_site_not_found(
         self,
-        study_oid: str,
-        requested_site_oid: Optional[str],
+        error: RWSError,
+        transaction: Optional[RaveTransaction],
     ) -> DiagnosticReport:
-        if not requested_site_oid:
+        if not transaction or not transaction._subjects:
             return DiagnosticReport(
                 category="site_not_found",
                 severity="error",
-                evidence={"study_oid": study_oid},
+                evidence={"http_status": error.http_status},
                 recommendation=(
-                    "Could not extract a SiteOID from the transaction. "
-                    "Ensure every subject carries a valid LocationOID."
+                    "No transaction was provided or it contained no subjects. "
+                    "Ensure each SubjectData element carries a valid "
+                    "SiteRef LocationOID."
                 ),
                 safe_to_retry=False,
             )
 
-        try:
-            sites = self.get_sites(study_oid)
-            site_oids = [s["oid"] for s in sites]
-        except Exception:
-            return DiagnosticReport(
-                category="site_not_found",
-                severity="error",
-                requested={"site_oid": requested_site_oid, "study_oid": study_oid},
-                evidence={"accessible_site_count": None},
-                recommendation=(
-                    "Could not retrieve the site list for this study. "
-                    "Verify the SiteOID matches the exact configuration in Rave."
-                ),
-                safe_to_retry=False,
-            )
+        study_oid = getattr(transaction, "study_oid", "") if transaction else ""
+        # Collect the first site OID found in the transaction
+        site_oid = ""
+        for subj_data in transaction._subjects.values():
+            site_oid = subj_data.get("SiteOID", "")
+            if site_oid:
+                break
 
-        if requested_site_oid in site_oids:
-            return DiagnosticReport(
-                category="site_not_found",
-                severity="warning",
-                requested={"site_oid": requested_site_oid, "study_oid": study_oid},
-                evidence={
-                    "accessible_site_count": len(site_oids),
-                    "close_matches": [
-                        {"value": requested_site_oid, "similarity": 1.0}
-                    ],
-                },
-                recommendation=(
-                    "The SiteOID exists in the study, so the failure may be caused "
-                    "by subject-level permissions or environment mismatch."
-                ),
-                safe_to_retry=False,
-            )
-
-        suggestions = self._find_close_matches(requested_site_oid, site_oids)
+        known_sites = self.get_sites(study_oid)
+        close_matches = self._close_matches(site_oid, known_sites)
 
         return DiagnosticReport(
             category="site_not_found",
             severity="error",
-            requested={"site_oid": requested_site_oid, "study_oid": study_oid},
+            requested={"site_oid": site_oid, "study_oid": study_oid},
             evidence={
-                "accessible_site_count": len(site_oids),
-                "close_matches": suggestions,
+                "accessible_site_count": len(known_sites),
+                "close_matches": close_matches,
             },
             recommendation=(
-                "Confirm the SiteOID matches the exact LocationOID configured "
-                "in Rave for this study. No payload was changed automatically."
+                "Confirm the exact LocationOID using RaveDiagnostics.get_sites(). "
+                "OIDs are case-sensitive."
             ),
             safe_to_retry=False,
         )
 
-    def _diagnose_subject_not_found(
-        self,
-        study_oid: str,
-        subject_keys: List[str],
+    @staticmethod
+    def _report_subject_not_found(
+        error: RWSError,
+        transaction: Optional[RaveTransaction],
     ) -> DiagnosticReport:
+        subject_keys: List[str] = []
+        if transaction and transaction._subjects:
+            subject_keys = list(transaction._subjects.keys())
         return DiagnosticReport(
             category="subject_not_found",
             severity="error",
-            requested={"study_oid": study_oid, "subject_keys": subject_keys},
+            requested={"subject_keys": subject_keys},
             evidence={
                 "subject_count_in_transaction": len(subject_keys),
+                "http_status": error.http_status,
             },
             recommendation=(
-                "Verify that the SubjectKey(s) listed above exist in the target "
-                "study and site. RWS does not expose a subject list endpoint, so "
-                "no fuzzy matching is possible. Check for leading/trailing "
-                "whitespace, case differences, or environment mismatches."
+                "The SubjectKey in the transaction does not match an existing "
+                "subject in Rave. Verify the SubjectKey or use ActionType.INSERT "
+                "to create a new subject."
+            ),
+            safe_to_retry=False,
+        )
+
+    @staticmethod
+    def _report_unrecognized(
+        error: RWSError,
+        transaction: Optional[RaveTransaction],
+    ) -> DiagnosticReport:
+        return DiagnosticReport(
+            category="unrecognized_error",
+            severity="error",
+            evidence={
+                "http_status": error.http_status,
+                "message": str(error),
+            },
+            recommendation=(
+                "This error was not recognised by RaveForge. "
+                "Review the full error message and consult the Medidata RWS "
+                "documentation or support."
             ),
             safe_to_retry=False,
         )
 
     # ------------------------------------------------------------------
-    # Transaction inspection helpers
+    # Similarity helper
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_site_oid(transaction: "RaveTransaction") -> Optional[str]:
-        for subj_data in transaction._subjects.values():
-            site = subj_data.get("SiteOID")
-            if site:
-                return site
-        return None
+    def _close_matches(
+        query: str,
+        candidates: List[str],
+        threshold: float = _MATCH_THRESHOLD,
+    ) -> List[Dict[str, Any]]:
+        """
+        Return candidates whose similarity to ``query`` meets ``threshold``.
 
-    @staticmethod
-    def _extract_subject_keys(transaction: "RaveTransaction") -> List[str]:
-        return list(transaction._subjects.keys())
+        Each result is a dict with ``{value, similarity}`` keys. Results are
+        sorted descending by similarity.
+        """
+        results = []
+        for candidate in candidates:
+            ratio = difflib.SequenceMatcher(None, query, candidate).ratio()
+            if ratio >= threshold:
+                results.append({"value": candidate, "similarity": round(ratio, 4)})
+        return sorted(results, key=lambda x: x["similarity"], reverse=True)
