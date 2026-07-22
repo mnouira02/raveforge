@@ -90,7 +90,11 @@ class RWSClient:
             raise RWSError(f"Request timed out after {self.timeout}s.")
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
-        logger.debug("Response HTTP %s \u2014 %d bytes", response.status_code, len(response.content))
+        logger.debug(
+            "Response HTTP %s — %d bytes",
+            response.status_code,
+            len(response.content),
+        )
         return self._handle_response(response)
 
     def get_studies_raw(
@@ -106,7 +110,7 @@ class RWSClient:
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
         logger.debug(
-            "get_studies_raw: HTTP %s \u2014 %d bytes",
+            "get_studies_raw: HTTP %s — %d bytes",
             response.status_code,
             len(response.content),
         )
@@ -133,7 +137,7 @@ class RWSClient:
         studyoid_param = f"{project_name}({environment_name})"
         url = f"{self.base_url}/RaveWebServices/datasets/Sites.odm/"
         logger.debug(
-            "get_sites_raw: project=%r env=%r \u2192 GET %s?studyoid=%s",
+            "get_sites_raw: project=%r env=%r → GET %s?studyoid=%s",
             project_name,
             environment_name,
             url,
@@ -150,7 +154,7 @@ class RWSClient:
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
         logger.debug(
-            "get_sites_raw (project=%r env=%r): HTTP %s \u2014 %d bytes",
+            "get_sites_raw (project=%r env=%r): HTTP %s — %d bytes",
             project_name,
             environment_name,
             response.status_code,
@@ -186,8 +190,16 @@ class RWSClient:
         Ref: https://rwslib.readthedocs.io/en/latest/retrieve_clinical_data.html
         """
         project_name, environment_name = _parse_study_oid(study_oid)
-        url = f"{self.base_url}/RaveWebServices/studies/{project_name}({environment_name})/subjects"
-        logger.debug("get_subjects_raw: project=%r env=%r \u2192 GET %s", project_name, environment_name, url)
+        url = (
+            f"{self.base_url}/RaveWebServices/studies"
+            f"/{project_name}({environment_name})/subjects"
+        )
+        logger.debug(
+            "get_subjects_raw: project=%r env=%r → GET %s",
+            project_name,
+            environment_name,
+            url,
+        )
         try:
             response = self._session.get(url, timeout=self.timeout)
         except requests.exceptions.Timeout:
@@ -195,7 +207,7 @@ class RWSClient:
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
         logger.debug(
-            "get_subjects_raw (project=%r env=%r): HTTP %s \u2014 %d bytes",
+            "get_subjects_raw (project=%r env=%r): HTTP %s — %d bytes",
             project_name,
             environment_name,
             response.status_code,
@@ -223,7 +235,7 @@ class RWSClient:
         if response.status_code == 200:
             if self._is_login_page(body):
                 raise RWSError(
-                    "Unauthorised \u2014 RWS redirected to the login page. "
+                    "Unauthorised — RWS redirected to the login page. "
                     "Check your username and password.",
                     http_status=401,
                 )
@@ -237,11 +249,11 @@ class RWSClient:
             return body
 
         rws_messages = {
-            400: "Bad Request \u2014 malformed ODM XML.",
-            401: "Unauthorised \u2014 check credentials.",
-            403: "Forbidden \u2014 insufficient RWS permissions.",
-            404: "Not Found \u2014 check study OID or endpoint URL.",
-            409: "Conflict \u2014 transaction violates study configuration.",
+            400: "Bad Request — malformed ODM XML.",
+            401: "Unauthorised — check credentials.",
+            403: "Forbidden — insufficient RWS permissions.",
+            404: "Not Found — check study OID or endpoint URL.",
+            409: "Conflict — transaction violates study configuration.",
         }
         message = rws_messages.get(
             response.status_code, f"Unexpected HTTP {response.status_code}."
