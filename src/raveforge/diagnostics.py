@@ -76,6 +76,21 @@ class RaveDiagnostics:
         self._client = client
 
     # ------------------------------------------------------------------
+    # Internal utilities
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _strip_bom(text: str) -> str:
+        """Remove a leading UTF-8 BOM (\ufeff) if present.
+
+        RWS (innovate and production) prepends a BOM to every XML
+        response body. ``xml.etree.ElementTree.fromstring`` treats the
+        BOM as illegal leading content and raises ``ParseError``, which
+        causes all parsing methods to silently return empty lists.
+        """
+        return text.lstrip("\ufeff")
+
+    # ------------------------------------------------------------------
     # Study helpers
     # ------------------------------------------------------------------
 
@@ -93,7 +108,7 @@ class RaveDiagnostics:
     def _parse_studies(body: str) -> List[Dict[str, str]]:
         studies: List[Dict[str, str]] = []
         try:
-            root = ET.fromstring(body)
+            root = ET.fromstring(RaveDiagnostics._strip_bom(body))
         except ET.ParseError:
             return studies
         for study in root.iter(f"{{{ODM_NS}}}Study"):
@@ -130,7 +145,7 @@ class RaveDiagnostics:
     def _parse_site_oids(body: str) -> List[str]:
         site_oids: List[str] = []
         try:
-            root = ET.fromstring(body)
+            root = ET.fromstring(RaveDiagnostics._strip_bom(body))
         except ET.ParseError:
             return site_oids
         # RWS returns sites as <Location OID="..." /> elements
@@ -157,8 +172,8 @@ class RaveDiagnostics:
         self,
         target: str,
         candidates: List[str],
-        limit: int = 3,
         threshold: float = _MATCH_THRESHOLD,
+        limit: int = 3,
     ) -> List[Dict[str, Any]]:
         if not target or not candidates:
             return []
