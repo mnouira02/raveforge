@@ -25,10 +25,22 @@ SAMPLE_STUDIES_XML = (
     '</ODM>'
 )
 
+SAMPLE_SITES_XML = (
+    '<ODM xmlns="http://www.cdisc.org/ns/odm/v1.3">'
+    '  <Location OID="SITE-001" />'
+    '  <Location OID="SITE-002" />'
+    '  <Location OID="SITE-ALPHA" />'
+    '</ODM>'
+)
 
-def make_client(studies_xml: str = SAMPLE_STUDIES_XML) -> Mock:
+
+def make_client(
+    studies_xml: str = SAMPLE_STUDIES_XML,
+    sites_xml: str = SAMPLE_SITES_XML,
+) -> Mock:
     client = Mock()
     client.get_studies_raw.return_value = studies_xml
+    client.get_sites_raw.return_value = sites_xml
     return client
 
 
@@ -128,6 +140,7 @@ def test_categorize_error_study_not_found():
     error = RWSError("Study not found or invalid study OID.", http_status=404)
     assert RaveDiagnostics.categorize_error(error) == "study_not_found"
 
+
 def test_categorize_error_unknown():
     error = RWSError("Something strange.", http_status=404)
     assert RaveDiagnostics.categorize_error(error) == "not_found"
@@ -205,9 +218,7 @@ def test_diagnose_study_not_found_includes_close_matches():
     # A close match should be suggested
     assert "close_matches" in report.evidence
     assert len(report.evidence["close_matches"]) >= 1
-    suggested_oids = [
-        m["value"] for m in report.evidence["close_matches"]
-    ]
+    suggested_oids = [m["value"] for m in report.evidence["close_matches"]]
     assert "Mediflex_01" in suggested_oids
 
 
@@ -238,6 +249,70 @@ def test_diagnose_study_not_found_exact_match_found():
     )
     assert exact is not None
     assert exact["similarity"] == 1.0
+
+
+# -------------------------------------------------------------------
+# site_not_found branch
+# -------------------------------------------------------------------
+
+
+def test_diagnose_site_not_found_includes_close_matches():
+    """A slightly misspelled SiteOID should surface the closest known site."""
+    diag = RaveDiagnostics(make_client())
+    error = RWSError("Site invalid.", http_status=404)
+    tx = RaveTransaction("Mediflex_01")
+    # SITE-001 vs SITE-00l (letter l instead of digit 1)
+    tx.subject("SUBJ-001", "SITE-00l").event("V1").form("DM").item_group("G1").item(
+        "AGE", value="30"
+    )
+
+    report = diag.explain_submission_failure(error, tx)
+
+    assert report.category == "site_not_found"
+    assert report.severity == "error"
+    assert "accessible_site_count" in report.evidence
+    assert report.evidence["accessible_site_count"] == 3
+    assert "close_matches" in report.evidence
+    suggested = [m["value"] for m in report.evidence["close_matches"]]
+    assert "SITE-001" in suggested
+
+
+def test_diagnose_site_not_found_no_matches_when_completely_different():
+    """No close matches when the SiteOID bears no resemblance to known sites."""
+    diag = RaveDiagnostics(make_client())
+    error = RWSError("Site invalid.", http_status=404)
+    tx = RaveTransaction("Mediflex_01")
+    tx.subject("SUBJ-001", "ZZZZZZZ").event("V1").form("DM").item_group("G1").item(
+        "AGE", value="30"
+    )
+
+    report = diag.explain_submission_failure(error, tx)
+
+    assert report.category == "site_not_found"
+    assert report.evidence["close_matches"] == []
+
+
+# -------------------------------------------------------------------
+# subject_not_found branch
+# -------------------------------------------------------------------
+
+
+def test_diagnose_subject_not_found_returns_subject_keys():
+    """Validates that the subject keys from the transaction are surfaced."""
+    diag = RaveDiagnostics(make_client())
+    error = RWSError("Subject not found.", http_status=404)
+    tx = RaveTransaction("Mediflex_01")
+    tx.subject("SUBJ-001", "SITE-001").event("V1").form("DM").item_group("G1").item(
+        "AGE", value="30"
+    )
+
+    report = diag.explain_submission_failure(error, tx)
+
+    assert report.category == "subject_not_found"
+    assert report.severity == "error"
+    assert report.safe_to_retry is False
+    assert "SUBJ-001" in report.requested["subject_keys"]
+    assert report.evidence["subject_count_in_transaction"] == 1
 
 
 # -------------------------------------------------------------------
