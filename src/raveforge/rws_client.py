@@ -2,23 +2,46 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
 import requests
 from requests.auth import HTTPBasicAuth
 
 from .exceptions import RWSError
 
-# Rave returns an HTTP 200 with the HTML login page when credentials are
-# invalid or the session has expired.  Detect this by looking for the
-# characteristic <form> action that Rave always uses on its login page.
 _LOGIN_PAGE_MARKERS = (
     "Login.aspx",
     "UserLoginBox",
     "Medidata Classic Rave",
 )
 
+# Matches OIDs of the form  ProjectName(EnvironmentName)
+_OID_RE = re.compile(r"^(.+?)\((.+)\)$")
+
 logger = logging.getLogger(__name__)
+
+
+def _parse_study_oid(study_oid: str) -> Tuple[str, str]:
+    """
+    Split a Rave study OID into ``(project_name, environment_name)``.
+
+    rwslib's ``SitesMetadataRequest`` is defined as::
+
+        SitesMetadataRequest(project_name=None, environment_name=None)
+
+    so the OID ``Mediflex(Dev)`` must be parsed into
+    ``project_name="Mediflex"`` and ``environment_name="Dev"`` before use.
+
+    Raises:
+        RWSError: If the OID does not match the expected ``Project(Env)`` format.
+    """
+    m = _OID_RE.match(study_oid)
+    if not m:
+        raise RWSError(
+            f"Invalid study OID {study_oid!r}. "
+            "Expected format: ProjectName(EnvironmentName), e.g. Mediflex(Dev)."
+        )
+    return m.group(1), m.group(2)
 
 
 class RWSClient:
@@ -117,32 +140,39 @@ class RWSClient:
         """
         Retrieve the raw ODM XML listing of sites for a given study.
 
-        Uses the RWS **ODM Adapter SitesMetadata** endpoint::
+        Mirrors ``rwslib.rws_requests.odm_adapter.SitesMetadataRequest``
+        which is defined as::
 
-            GET /RaveWebServices/datasets/Sites.odm/?studyoid={project_name}({environment_name})
+            SitesMetadataRequest(project_name=None, environment_name=None)
 
-        The study OID (e.g. ``Mediflex(Dev)``) is passed as the ``studyoid``
-        query-string parameter.  ``requests`` percent-encodes it automatically
-        so the parentheses become ``%28`` / ``%29`` as RWS expects.
-
-        Returns an ODM ``<AdminData>`` document listing every active site and
-        its metadata-version assignments for the study.
+        The ``study_oid`` (e.g. ``Mediflex(Dev)``) is first split into
+        ``project_name="Mediflex"`` and ``environment_name="Dev"`` via
+        :func:`_parse_study_oid`, then recombined as the ``studyoid``
+        query-string parameter.
 
         Returns:
             BOM-stripped XML suitable for ``ET.fromstring``.
 
         Raises:
-            RWSError: On HTTP errors, auth failures, or network failures.
+            RWSError: If the OID format is invalid, or on HTTP / network errors.
 
         Reference:
-            https://rwslib.readthedocs.io/en/latest/odm_adapter.html#sitesmetadatarequest
+            https://rwslib.readthedocs.io/en/latest/classes.html
         """
+        project_name, environment_name = _parse_study_oid(study_oid)
+        studyoid_param = f"{project_name}({environment_name})"
         url = f"{self.base_url}/RaveWebServices/datasets/Sites.odm/"
-        logger.debug("GET %s?studyoid=%s", url, study_oid)
+        logger.debug(
+            "get_sites_raw: project=%r env=%r → GET %s?studyoid=%s",
+            project_name,
+            environment_name,
+            url,
+            studyoid_param,
+        )
         try:
             response = self._session.get(
                 url,
-                params={"studyoid": study_oid},
+                params={"studyoid": studyoid_param},
                 timeout=self.timeout,
             )
         except requests.exceptions.Timeout:
@@ -150,8 +180,9 @@ class RWSClient:
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
         logger.debug(
-            "get_sites_raw (oid=%r): HTTP %s — %d bytes",
-            study_oid,
+            "get_sites_raw (project=%r env=%r): HTTP %s — %d bytes",
+            project_name,
+            environment_name,
             response.status_code,
             len(response.content),
         )
@@ -178,31 +209,16 @@ class RWSClient:
             return False
 
     def _handle_response(self, response: requests.Response) -> str:
-        # RWS always prepends a UTF-8 BOM (0xEF 0xBB 0xBF) to every XML
-        # response body.  When the HTTP Content-Type header omits a charset
-        # (or specifies something other than utf-8), requests auto-detects the
-        # encoding as latin-1 and decodes the 3-byte BOM into the three
-        # characters ï»¿ rather than the single unicode character \ufeff.
-        # A subsequent lstrip("\ufeff") then does nothing, and ET.fromstring()
-        # raises ParseError: not well-formed (invalid token).
-        #
-        # Forcing utf-8-sig — Python's codec that decodes UTF-8 *and* strips
-        # the BOM atomically — makes BOM removal unconditional and independent
-        # of whatever encoding the HTTP headers advertise.
         response.encoding = "utf-8-sig"
         body = response.text
 
         if response.status_code == 200:
-            # Rave sometimes returns a 200 with the HTML login page when
-            # credentials are wrong or the session has expired.
             if self._is_login_page(body):
                 raise RWSError(
                     "Unauthorised — RWS redirected to the login page. "
                     "Check your username and password.",
                     http_status=401,
                 )
-            # RWS sometimes wraps a transaction failure in an HTTP 200 response.
-            # The canonical signal is IsTransactionSuccessful set to false.
             if "<IsTransactionSuccessful>false</IsTransactionSuccessful>" in body:
                 rws_code = self._extract_rws_code(body)
                 raise RWSError(
