@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -12,7 +13,10 @@ if TYPE_CHECKING:
     from .core import RaveTransaction
 
 ODM_NS = "http://www.cdisc.org/ns/odm/v1.3"
+MDSOL_NS = "http://www.mdsol.com/ns/odm/metadata"
 _MATCH_THRESHOLD = 0.6
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -109,7 +113,10 @@ class RaveDiagnostics:
         studies: List[Dict[str, str]] = []
         try:
             root = ET.fromstring(RaveDiagnostics._strip_bom(body))
-        except ET.ParseError:
+        except ET.ParseError as exc:
+            logger.warning(
+                "_parse_studies: failed to parse RWS studies XML: %s", exc
+            )
             return studies
         for study in root.iter(f"{{{ODM_NS}}}Study"):
             oid = study.attrib.get("OID", "")
@@ -135,6 +142,12 @@ class RaveDiagnostics:
         Delegates to ``client.get_sites_raw(study_oid)`` and parses
         LocationOID attributes from the returned ODM XML.
 
+        RWS returns sites in one of three shapes depending on environment
+        and version:
+          1. ``<SiteRef LocationOID="..."/>`` under ClinicalData (most common)
+          2. ``<mdsol:Location OID="..."/>`` Medidata-namespaced element
+          3. ``<Location OID="..."/>`` ODM-namespaced or bare element
+
         Returns:
             A list of site OID strings.
         """
@@ -146,18 +159,38 @@ class RaveDiagnostics:
         site_oids: List[str] = []
         try:
             root = ET.fromstring(RaveDiagnostics._strip_bom(body))
-        except ET.ParseError:
+        except ET.ParseError as exc:
+            logger.warning(
+                "_parse_site_oids: failed to parse RWS sites XML: %s", exc
+            )
             return site_oids
-        # RWS returns sites as <Location OID="..." /> elements
-        for loc in root.iter("Location"):
-            oid = loc.attrib.get("OID", "")
-            if oid:
+
+        seen: set = set()
+
+        def _add(oid: str) -> None:
+            if oid and oid not in seen:
+                seen.add(oid)
                 site_oids.append(oid)
-        # Also handle ODM-namespaced Location elements
+
+        # Shape 1: <SiteRef LocationOID="..."/> — the most common RWS response
+        for ref in root.iter(f"{{{ODM_NS}}}SiteRef"):
+            _add(ref.attrib.get("LocationOID", ""))
+        # Also bare SiteRef (no namespace) for older/non-standard responses
+        for ref in root.iter("SiteRef"):
+            _add(ref.attrib.get("LocationOID", ""))
+
+        # Shape 2: Medidata-namespaced Location
+        for loc in root.iter(f"{{{MDSOL_NS}}}Location"):
+            _add(loc.attrib.get("OID", ""))
+
+        # Shape 3: ODM-namespaced Location
         for loc in root.iter(f"{{{ODM_NS}}}Location"):
-            oid = loc.attrib.get("OID", "")
-            if oid and oid not in site_oids:
-                site_oids.append(oid)
+            _add(loc.attrib.get("OID", ""))
+
+        # Shape 3b: bare Location (no namespace)
+        for loc in root.iter("Location"):
+            _add(loc.attrib.get("OID", ""))
+
         return site_oids
 
     # ------------------------------------------------------------------

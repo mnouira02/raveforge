@@ -96,7 +96,6 @@ def test_validate_non_strict_does_not_raise_on_no_subjects():
     tx = RaveTransaction("STUDY_01")
     issues = validate(tx, strict=False)
     assert any(i.code == "NO_SUBJECTS" for i in issues)
-    # non-strict should return the issues list without raising
 
 
 def test_validate_no_subjects_is_warning_severity():
@@ -107,7 +106,43 @@ def test_validate_no_subjects_is_warning_severity():
 
 
 # ---------------------------------------------------------------------------
-# SUBJECT_KEY_EMPTY / SITE_OID_EMPTY
+# SUBJECT_KEY_EMPTY
+# ---------------------------------------------------------------------------
+
+def test_validate_raises_on_empty_subject_key():
+    """A subject with an empty SubjectKey should fail."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("", "SITE-01").event("V1").form("F1").item_group("G1").item("IT", value="x")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    assert any(i.code == "SUBJECT_KEY_EMPTY" for i in exc_info.value.issues)
+
+
+def test_validate_raises_on_whitespace_subject_key():
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("   ", "SITE-01").event("V1").form("F1").item_group("G1").item("IT", value="x")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    assert any(i.code == "SUBJECT_KEY_EMPTY" for i in exc_info.value.issues)
+
+
+# ---------------------------------------------------------------------------
+# SUBJECT_KEY_INVALID_CHARS
+# ---------------------------------------------------------------------------
+
+def test_validate_raises_on_subject_key_with_invalid_chars():
+    """A subject key containing XML-illegal characters should fail."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ<001", "SITE-01").event("V1").form("F1").item_group("G1").item("IT", value="x")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    codes = [i.code for i in exc_info.value.issues]
+    # Either SUBJECT_KEY_INVALID_CHARS or a generic OID invalid chars code
+    assert any("INVALID_CHARS" in c for c in codes)
+
+
+# ---------------------------------------------------------------------------
+# SITE_OID_EMPTY
 # ---------------------------------------------------------------------------
 
 def test_validate_raises_on_empty_site_oid():
@@ -148,6 +183,36 @@ def test_validate_subject_no_events_is_warning():
     assert no_ev.severity == Severity.WARNING
 
 
+def test_validate_subject_no_events_location_contains_subject_key():
+    """SUBJECT_NO_EVENTS issue location must identify the offending subject."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-XYZ", "SITE-01")
+    issues = validate(tx, strict=False)
+    no_ev = next(i for i in issues if i.code == "SUBJECT_NO_EVENTS")
+    assert "SUBJ-XYZ" in (no_ev.location or "")
+
+
+# ---------------------------------------------------------------------------
+# EVENT_OID_EMPTY
+# ---------------------------------------------------------------------------
+
+def test_validate_raises_on_empty_event_oid():
+    """An event with an empty OID should fail."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("").form("F1").item_group("G1").item("IT", value="x")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    assert any(i.code == "EVENT_OID_EMPTY" for i in exc_info.value.issues)
+
+
+def test_validate_raises_on_whitespace_event_oid():
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("   ").form("F1").item_group("G1").item("IT", value="x")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    assert any(i.code == "EVENT_OID_EMPTY" for i in exc_info.value.issues)
+
+
 # ---------------------------------------------------------------------------
 # EVENT_NO_FORMS (WARNING)
 # ---------------------------------------------------------------------------
@@ -169,6 +234,36 @@ def test_validate_event_no_forms_is_warning():
     assert no_forms.severity == Severity.WARNING
 
 
+def test_validate_event_no_forms_location_contains_event_oid():
+    """EVENT_NO_FORMS location must reference the offending event OID."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("VISIT_99")
+    issues = validate(tx, strict=False)
+    no_forms = next(i for i in issues if i.code == "EVENT_NO_FORMS")
+    assert "VISIT_99" in (no_forms.location or "")
+
+
+# ---------------------------------------------------------------------------
+# FORM_OID_EMPTY
+# ---------------------------------------------------------------------------
+
+def test_validate_raises_on_empty_form_oid():
+    """A form with an empty OID should fail."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("V1").form("").item_group("G1").item("IT", value="x")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    assert any(i.code == "FORM_OID_EMPTY" for i in exc_info.value.issues)
+
+
+def test_validate_raises_on_whitespace_form_oid():
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("V1").form("   ").item_group("G1").item("IT", value="x")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    assert any(i.code == "FORM_OID_EMPTY" for i in exc_info.value.issues)
+
+
 # ---------------------------------------------------------------------------
 # FORM_NO_ITEM_GROUPS (WARNING)
 # ---------------------------------------------------------------------------
@@ -188,6 +283,89 @@ def test_validate_form_no_item_groups_is_warning():
     no_ig = next((i for i in issues if i.code == "FORM_NO_ITEM_GROUPS"), None)
     assert no_ig is not None
     assert no_ig.severity == Severity.WARNING
+
+
+def test_validate_form_no_item_groups_location_contains_form_oid():
+    """FORM_NO_ITEM_GROUPS location must reference the offending form OID."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("V1").form("CONMEDS")
+    issues = validate(tx, strict=False)
+    no_ig = next(i for i in issues if i.code == "FORM_NO_ITEM_GROUPS")
+    assert "CONMEDS" in (no_ig.location or "")
+
+
+# ---------------------------------------------------------------------------
+# ITEM_GROUP_OID_EMPTY
+# ---------------------------------------------------------------------------
+
+def test_validate_raises_on_empty_item_group_oid():
+    """An item group with an empty OID should fail."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("V1").form("DM").item_group("").item("IT", value="x")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    assert any(i.code == "ITEM_GROUP_OID_EMPTY" for i in exc_info.value.issues)
+
+
+def test_validate_raises_on_whitespace_item_group_oid():
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("V1").form("DM").item_group("   ").item("IT", value="x")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    assert any(i.code == "ITEM_GROUP_OID_EMPTY" for i in exc_info.value.issues)
+
+
+# ---------------------------------------------------------------------------
+# ITEM_GROUP_NO_ITEMS (WARNING)
+# ---------------------------------------------------------------------------
+
+def test_validate_warns_on_item_group_with_no_items_strict():
+    """An item group with no items raises in strict mode."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("V1").form("DM").item_group("DM_IG")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx, strict=True)
+    assert any(i.code == "ITEM_GROUP_NO_ITEMS" for i in exc_info.value.issues)
+
+
+def test_validate_item_group_no_items_is_warning():
+    """An item group with no items is WARNING severity in non-strict mode."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("V1").form("DM").item_group("DM_IG")
+    issues = validate(tx, strict=False)
+    no_items = next((i for i in issues if i.code == "ITEM_GROUP_NO_ITEMS"), None)
+    assert no_items is not None
+    assert no_items.severity == Severity.WARNING
+
+
+def test_validate_item_group_no_items_location_contains_group_oid():
+    """ITEM_GROUP_NO_ITEMS location must reference the offending group OID."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("V1").form("DM").item_group("DM_IG_ROW2")
+    issues = validate(tx, strict=False)
+    no_items = next(i for i in issues if i.code == "ITEM_GROUP_NO_ITEMS")
+    assert "DM_IG_ROW2" in (no_items.location or "")
+
+
+# ---------------------------------------------------------------------------
+# ITEM_OID_EMPTY
+# ---------------------------------------------------------------------------
+
+def test_validate_raises_on_empty_item_oid():
+    """An item with an empty OID should fail."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("V1").form("DM").item_group("G1").item("", value="x")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    assert any(i.code == "ITEM_OID_EMPTY" for i in exc_info.value.issues)
+
+
+def test_validate_raises_on_whitespace_item_oid():
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("V1").form("DM").item_group("G1").item("   ", value="x")
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    assert any(i.code == "ITEM_OID_EMPTY" for i in exc_info.value.issues)
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +417,15 @@ def test_validate_item_with_query_does_not_warn():
     assert not any(i.code == "ITEM_NO_VALUE" for i in issues)
 
 
+def test_validate_item_no_value_location_contains_item_oid():
+    """ITEM_NO_VALUE location must reference the offending item OID."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "SITE-01").event("V1").form("DM").item_group("G1").item("BIRTHDT")
+    issues = validate(tx, strict=False)
+    no_val = next(i for i in issues if i.code == "ITEM_NO_VALUE")
+    assert "BIRTHDT" in (no_val.location or "")
+
+
 # ---------------------------------------------------------------------------
 # Multiple issues collected in one pass
 # ---------------------------------------------------------------------------
@@ -246,13 +433,24 @@ def test_validate_item_with_query_does_not_warn():
 def test_validate_collects_all_issues_before_raising():
     """Validate aggregates every problem rather than stopping at the first."""
     tx = RaveTransaction("STUDY<01")  # STUDY_OID_INVALID_CHARS
-    # Also add a subject with no events to stack up a second issue
     tx.subject("SUBJ-001", "SITE-01")
     with pytest.raises(ValidationError) as exc_info:
         validate(tx)
     codes = [i.code for i in exc_info.value.issues]
     assert "STUDY_OID_INVALID_CHARS" in codes
     assert "SUBJECT_NO_EVENTS" in codes
+
+
+def test_validate_multiple_subjects_all_issues_collected():
+    """Issues across multiple subjects are all collected in a single pass."""
+    tx = RaveTransaction("STUDY_01")
+    tx.subject("SUBJ-001", "")   # SITE_OID_EMPTY
+    tx.subject("", "SITE-01")    # SUBJECT_KEY_EMPTY
+    with pytest.raises(ValidationError) as exc_info:
+        validate(tx)
+    codes = [i.code for i in exc_info.value.issues]
+    assert "SITE_OID_EMPTY" in codes
+    assert "SUBJECT_KEY_EMPTY" in codes
 
 
 # ---------------------------------------------------------------------------
