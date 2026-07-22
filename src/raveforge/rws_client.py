@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Optional
 
@@ -16,6 +17,8 @@ _LOGIN_PAGE_MARKERS = (
     "UserLoginBox",
     "Medidata Classic Rave",
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RWSClient:
@@ -68,12 +71,14 @@ class RWSClient:
             RWSError: On HTTP errors or RWS-level error responses.
         """
         url = f"{self.base_url}{endpoint}"
+        logger.debug("POST %s", url)
         try:
             response = self._session.post(url, data=odm_bytes, timeout=self.timeout)
         except requests.exceptions.Timeout:
             raise RWSError(f"Request timed out after {self.timeout}s.")
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
+        logger.debug("Response HTTP %s — %d bytes", response.status_code, len(response.text))
         return self._handle_response(response)
 
     def get_studies_raw(
@@ -84,22 +89,59 @@ class RWSClient:
         Retrieve the raw ODM XML listing of studies accessible to the
         authenticated user.
 
+        Routes through ``_handle_response`` so that login-page redirects
+        (HTTP 200 with HTML body) raise ``RWSError`` instead of silently
+        returning empty XML.
+
         Raises:
-            RWSError: On HTTP errors or network failures.
+            RWSError: On HTTP errors, auth failures, or network failures.
         """
         url = f"{self.base_url}{endpoint}"
+        logger.debug("GET %s", url)
         try:
             response = self._session.get(url, timeout=self.timeout)
         except requests.exceptions.Timeout:
             raise RWSError(f"Request timed out after {self.timeout}s.")
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
-        if response.status_code != 200:
-            raise RWSError(
-                f"Failed to retrieve study list (HTTP {response.status_code}).",
-                http_status=response.status_code,
-            )
-        return response.text
+        logger.debug(
+            "get_studies_raw: HTTP %s — %d bytes — body[:200]: %r",
+            response.status_code,
+            len(response.text),
+            response.text[:200],
+        )
+        return self._handle_response(response)
+
+    def get_sites_raw(
+        self,
+        study_oid: str,
+        endpoint_template: str = "/RaveWebServices/studies/{study_oid}/sites",
+    ) -> str:
+        """
+        Retrieve the raw XML listing of sites for a given study.
+
+        Routes through ``_handle_response`` so that auth failures surface
+        as ``RWSError`` rather than empty results.
+
+        Raises:
+            RWSError: On HTTP errors, auth failures, or network failures.
+        """
+        endpoint = endpoint_template.format(study_oid=study_oid)
+        url = f"{self.base_url}{endpoint}"
+        logger.debug("GET %s", url)
+        try:
+            response = self._session.get(url, timeout=self.timeout)
+        except requests.exceptions.Timeout:
+            raise RWSError(f"Request timed out after {self.timeout}s.")
+        except requests.exceptions.ConnectionError as exc:
+            raise RWSError(f"Connection failed: {exc}")
+        logger.debug(
+            "get_sites_raw: HTTP %s — %d bytes — body[:200]: %r",
+            response.status_code,
+            len(response.text),
+            response.text[:200],
+        )
+        return self._handle_response(response)
 
     def ping(self) -> bool:
         """
