@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import difflib
 import logging
-import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
