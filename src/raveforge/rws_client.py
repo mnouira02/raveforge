@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import quote
 from typing import Optional
 
 import requests
@@ -113,10 +114,15 @@ class RWSClient:
     def get_sites_raw(
         self,
         study_oid: str,
-        endpoint_template: str = "/RaveWebServices/studies/{study_oid}/sites",
     ) -> str:
         """
         Retrieve the raw XML listing of sites for a given study.
+
+        Study OIDs such as ``Mediflex(Dev)`` contain characters that are
+        not valid in a URL path segment without encoding.  The OID is
+        percent-encoded with :func:`urllib.parse.quote` before being
+        interpolated into the path so that ``Mediflex(Dev)`` becomes
+        ``Mediflex%28Dev%29``.
 
         Returns BOM-stripped XML so callers can pass directly to
         ``ET.fromstring`` without a ``ParseError``.
@@ -124,8 +130,8 @@ class RWSClient:
         Raises:
             RWSError: On HTTP errors, auth failures, or network failures.
         """
-        endpoint = endpoint_template.format(study_oid=study_oid)
-        url = f"{self.base_url}{endpoint}"
+        encoded_oid = quote(study_oid, safe="")
+        url = f"{self.base_url}/RaveWebServices/studies/{encoded_oid}/sites"
         logger.debug("GET %s", url)
         try:
             response = self._session.get(url, timeout=self.timeout)
