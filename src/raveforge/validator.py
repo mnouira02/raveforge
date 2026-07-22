@@ -102,6 +102,16 @@ def _validate_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> 
                 message="A subject was added with an empty SubjectKey.",
                 location=subj_loc,
             ))
+        elif _INVALID_OID_CHARS_RE.search(subj_key):
+            issues.append(ValidationIssue(
+                severity=Severity.ERROR,
+                code="SUBJECT_KEY_INVALID_CHARS",
+                message=(
+                    f"SubjectKey '{subj_key}' contains characters that are "
+                    f"illegal in an ODM OID attribute (<, >, &)."
+                ),
+                location=subj_loc,
+            ))
 
         if not subj_data.get("SiteOID") or not subj_data["SiteOID"].strip():
             issues.append(ValidationIssue(
@@ -181,6 +191,19 @@ def _validate_subjects(tx: "RaveTransaction", issues: List[ValidationIssue]) -> 
                             ),
                             location=group_loc,
                         ))
+
+                    if not group_data.get("Items"):
+                        issues.append(ValidationIssue(
+                            severity=Severity.WARNING,
+                            code="ITEM_GROUP_NO_ITEMS",
+                            message=(
+                                f"Item group '{group_data['OID']}' has no items. "
+                                f"The item group node will be serialised but carry "
+                                f"no clinical data."
+                            ),
+                            location=group_loc,
+                        ))
+                        continue
 
                     for item_oid, item_dict in group_data.get("Items", {}).items():
                         item_loc = f"{group_loc} > {item_oid}"
