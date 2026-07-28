@@ -74,10 +74,13 @@ class RWSClient:
         self._session = requests.Session()
         self._session.auth = self.auth
         
-        # Only set Accept at the session level. 
-        # Setting Content-Type here causes requests to munge the spacing, 
-        # which breaks Medidata's strict WAF.
-        self._session.headers.update({"Accept": "text/xml"})
+        # Forcibly strip requests' default session headers and reconstruct them 
+        # to guarantee strict spacing compliance for Medidata RWS.
+        self._session.headers.clear()
+        self._session.headers.update({
+            "Content-Type": "text/xml; charset=utf-8",
+            "Accept": "text/xml",
+        })
 
     def post_odm(
         self,
