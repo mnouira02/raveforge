@@ -73,8 +73,10 @@ class RWSClient:
         self.timeout = timeout
         self._session = requests.Session()
         self._session.auth = self.auth
+        
+        # The space before charset is critical for WAF bypass
         self._session.headers.update({
-            "Content-Type": "text/xml;charset=UTF-8",
+            "Content-Type": "text/xml; charset=utf-8",
             "Accept": "text/xml",
         })
 
@@ -83,7 +85,8 @@ class RWSClient:
         transaction_or_xml: Union[RaveTransaction, str, bytes],
         endpoint: str = "/RaveWebServices/webservice.aspx?PostODMClinicalData",
     ) -> str:
-        # 1. Normalize input to bytes for HTTP transmission
+        
+        # Normalize input to bytes for HTTP transmission
         if isinstance(transaction_or_xml, RaveTransaction):
             odm_bytes = transaction_or_xml.build()
         elif isinstance(transaction_or_xml, str):
