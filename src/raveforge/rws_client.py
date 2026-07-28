@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import requests
 from requests.auth import HTTPBasicAuth
 
+from .core import RaveTransaction
 from .exceptions import RWSError
 
 _LOGIN_PAGE_MARKERS = (
@@ -79,9 +80,19 @@ class RWSClient:
 
     def post_odm(
         self,
-        odm_bytes: bytes,
+        transaction_or_xml: Union[RaveTransaction, str, bytes],
         endpoint: str = "/RaveWebServices/webservice.aspx?PostODMClinicalData",
     ) -> str:
+        # 1. Normalize input to bytes for HTTP transmission
+        if isinstance(transaction_or_xml, RaveTransaction):
+            odm_bytes = transaction_or_xml.build()
+        elif isinstance(transaction_or_xml, str):
+            odm_bytes = transaction_or_xml.encode("utf-8")
+        elif isinstance(transaction_or_xml, bytes):
+            odm_bytes = transaction_or_xml
+        else:
+            raise ValueError("Payload must be a RaveTransaction, str, or bytes.")
+
         url = f"{self.base_url}{endpoint}"
         logger.debug("POST %s", url)
         try:
