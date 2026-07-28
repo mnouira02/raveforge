@@ -104,21 +104,20 @@ class RaveTransaction:
     def event(
         self,
         event_oid: str,
-        repeat_key: Optional[str] = None,
+        repeat_key: Optional[str] = _DEFAULT_REPEAT_KEY,
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
         """Add or switch to a study event context."""
         if self._current_subject is None:
             raise HierarchyError("Subject context required before calling event().")
-        effective_repeat_key = (
-            repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
-        )
+        
         events = self._subjects[self._current_subject]["Events"]
-        event_key = f"{event_oid}_{effective_repeat_key}"
+        event_key = f"{event_oid}_{repeat_key}"
+        
         if event_key not in events:
             events[event_key] = {
                 "OID": event_oid,
-                "RepeatKey": effective_repeat_key,
+                "RepeatKey": repeat_key,
                 "Action": action.value if action else None,
                 "Forms": {},
             }
@@ -130,24 +129,23 @@ class RaveTransaction:
     def form(
         self,
         form_oid: str,
-        repeat_key: Optional[str] = None,
+        repeat_key: Optional[str] = _DEFAULT_REPEAT_KEY,
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
         """Add or switch to a form context."""
         if self._current_event is None:
             raise HierarchyError("Event context required before calling form().")
-        effective_repeat_key = (
-            repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
-        )
+        
         forms = (
             self._subjects[self._current_subject]
             ["Events"][self._current_event]["Forms"]
         )
-        form_key = f"{form_oid}_{effective_repeat_key}"
+        form_key = f"{form_oid}_{repeat_key}"
+        
         if form_key not in forms:
             forms[form_key] = {
                 "OID": form_oid,
-                "RepeatKey": effective_repeat_key,
+                "RepeatKey": repeat_key,
                 "Action": action.value if action else None,
                 "ItemGroups": {},
             }
@@ -158,26 +156,25 @@ class RaveTransaction:
     def item_group(
         self,
         item_group_oid: str,
-        repeat_key: Optional[str] = None,
+        repeat_key: Optional[str] = _DEFAULT_REPEAT_KEY,
         action: Optional[ActionType] = None,
         specified_items_only: bool = False,
     ) -> RaveTransaction:
         """Add or switch to an item group context."""
         if self._current_form is None:
             raise HierarchyError("Form context required before calling item_group().")
-        effective_repeat_key = (
-            repeat_key if repeat_key is not None else _DEFAULT_REPEAT_KEY
-        )
+        
         groups = (
             self._subjects[self._current_subject]
             ["Events"][self._current_event]
             ["Forms"][self._current_form]["ItemGroups"]
         )
-        group_key = f"{item_group_oid}_{effective_repeat_key}"
+        group_key = f"{item_group_oid}_{repeat_key}"
+        
         if group_key not in groups:
             groups[group_key] = {
                 "OID": item_group_oid,
-                "RepeatKey": effective_repeat_key,
+                "RepeatKey": repeat_key,
                 "Action": action.value if action else None,
                 "SpecifiedItemsOnly": specified_items_only,
                 "Items": {},
@@ -245,14 +242,14 @@ class RaveTransaction:
     # Build
     # ------------------------------------------------------------------
 
-    def build(self, encoding: str = "UTF-8") -> bytes:
+    def build(self, encoding: str = "UTF-8") -> Any:
         """Serialise the transaction to ODM XML bytes."""
         root = ET.Element("ODM", {
             "xmlns": ODM_NS,
             "FileType": "Transactional",
             "FileOID": self.file_oid,
             "CreationDateTime": (
-                datetime.datetime.now(datetime.timezone.utc).isoformat()
+                datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
             ),
             "ODMVersion": "1.3",
         })
@@ -273,8 +270,9 @@ class RaveTransaction:
             for event_data in subj_data["Events"].values():
                 event_attribs: Dict[str, str] = {
                     "StudyEventOID": event_data["OID"],
-                    "StudyEventRepeatKey": event_data["RepeatKey"],
                 }
+                if event_data["RepeatKey"] is not None:
+                    event_attribs["StudyEventRepeatKey"] = str(event_data["RepeatKey"])
                 if event_data["Action"]:
                     event_attribs["TransactionType"] = event_data["Action"]
                 event_node = ET.SubElement(
@@ -284,8 +282,9 @@ class RaveTransaction:
                 for form_data in event_data["Forms"].values():
                     form_attribs: Dict[str, str] = {
                         "FormOID": form_data["OID"],
-                        "FormRepeatKey": form_data["RepeatKey"],
                     }
+                    if form_data["RepeatKey"] is not None:
+                        form_attribs["FormRepeatKey"] = str(form_data["RepeatKey"])
                     if form_data["Action"]:
                         form_attribs["TransactionType"] = form_data["Action"]
                     form_node = ET.SubElement(
@@ -298,7 +297,7 @@ class RaveTransaction:
                         }
                         if group_data["RepeatKey"] is not None:
                             group_attribs["ItemGroupRepeatKey"] = (
-                                group_data["RepeatKey"]
+                                str(group_data["RepeatKey"])
                             )
                         if group_data["Action"]:
                             group_attribs["TransactionType"] = group_data["Action"]
@@ -336,7 +335,17 @@ class RaveTransaction:
                                     },
                                 )
 
-        return ET.tostring(root, encoding=encoding, xml_declaration=True)
+        raw_data = ET.tostring(root, encoding=encoding, xml_declaration=True)
+        
+        # Intercept string generation to enforce standard double-quotes for the RWS WAF
+        if isinstance(raw_data, bytes):
+            xml_str = raw_data.decode(encoding)
+            if xml_str.startswith("<?xml"):
+                decl_end = xml_str.find(">")
+                xml_str = xml_str[: decl_end + 1].replace("'", '"') + xml_str[decl_end + 1 :]
+            return xml_str.encode(encoding)
+            
+        return raw_data
 
     def build_pretty(self) -> str:
         """
