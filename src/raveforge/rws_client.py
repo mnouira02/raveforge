@@ -73,7 +73,11 @@ class RWSClient:
         self.timeout = timeout
         self._session = requests.Session()
         self._session.auth = self.auth
-        # DO NOT set session.headers.update() here to prevent strict WAF rejections
+        
+        # Only set Accept at the session level. 
+        # Setting Content-Type here causes requests to munge the spacing, 
+        # which breaks Medidata's strict WAF.
+        self._session.headers.update({"Accept": "text/xml"})
 
     def post_odm(
         self,
@@ -81,7 +85,7 @@ class RWSClient:
         endpoint: str = "/RaveWebServices/webservice.aspx?PostODMClinicalData",
     ) -> str:
         
-        # Normalize input to bytes for HTTP transmission
+        # 1. Normalize input to bytes for HTTP transmission
         if isinstance(transaction_or_xml, RaveTransaction):
             odm_bytes = transaction_or_xml.build()
         elif isinstance(transaction_or_xml, str):
@@ -93,15 +97,14 @@ class RWSClient:
 
         url = f"{self.base_url}{endpoint}"
         logger.debug("POST %s", url)
-        
-        # Explicitly enforce sandbox-proven headers on the individual request
+
+        # 2. EXPLICITLY pass the Content-Type header on the request itself to prevent 
+        # requests.Session from normalizing/stripping the space before 'charset'
         request_headers = {
-            "Content-Type": "text/xml; charset=utf-8",
-            "Accept": "text/xml",
+            "Content-Type": "text/xml; charset=utf-8"
         }
 
         try:
-            # Pass headers directly to bypass any Session header normalization quirks
             response = self._session.post(
                 url, 
                 data=odm_bytes, 
