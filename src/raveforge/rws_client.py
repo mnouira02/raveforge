@@ -73,14 +73,6 @@ class RWSClient:
         self.timeout = timeout
         self._session = requests.Session()
         self._session.auth = self.auth
-        
-        # Forcibly strip requests' default session headers and reconstruct them 
-        # to guarantee strict spacing compliance for Medidata RWS.
-        self._session.headers.clear()
-        self._session.headers.update({
-            "Content-Type": "text/xml; charset=utf-8",
-            "Accept": "text/xml",
-        })
 
     def post_odm(
         self,
@@ -101,24 +93,26 @@ class RWSClient:
         url = f"{self.base_url}{endpoint}"
         logger.debug("POST %s", url)
 
-        # 2. EXPLICITLY pass the Content-Type header on the request itself to prevent 
-        # requests.Session from normalizing/stripping the space before 'charset'
-        request_headers = {
-            "Content-Type": "text/xml; charset=utf-8"
+        # 2. Enforce exact headers proven to satisfy Medidata's strict WAF
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "Accept": "text/xml",
         }
 
         try:
-            response = self._session.post(
-                url, 
-                data=odm_bytes, 
-                headers=request_headers, 
-                timeout=self.timeout
+            # Use standalone requests.post to avoid session header reformatting quirks
+            response = requests.post(
+                url,
+                data=odm_bytes,
+                headers=headers,
+                auth=self.auth,
+                timeout=self.timeout,
             )
         except requests.exceptions.Timeout:
             raise RWSError(f"Request timed out after {self.timeout}s.")
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
-        
+
         logger.debug(
             "Response HTTP %s — %d bytes",
             response.status_code,
