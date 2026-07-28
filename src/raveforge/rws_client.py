@@ -73,12 +73,7 @@ class RWSClient:
         self.timeout = timeout
         self._session = requests.Session()
         self._session.auth = self.auth
-        
-        # The space before charset is critical for WAF bypass
-        self._session.headers.update({
-            "Content-Type": "text/xml; charset=utf-8",
-            "Accept": "text/xml",
-        })
+        # DO NOT set session.headers.update() here to prevent strict WAF rejections
 
     def post_odm(
         self,
@@ -98,12 +93,26 @@ class RWSClient:
 
         url = f"{self.base_url}{endpoint}"
         logger.debug("POST %s", url)
+        
+        # Explicitly enforce sandbox-proven headers on the individual request
+        request_headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "Accept": "text/xml",
+        }
+
         try:
-            response = self._session.post(url, data=odm_bytes, timeout=self.timeout)
+            # Pass headers directly to bypass any Session header normalization quirks
+            response = self._session.post(
+                url, 
+                data=odm_bytes, 
+                headers=request_headers, 
+                timeout=self.timeout
+            )
         except requests.exceptions.Timeout:
             raise RWSError(f"Request timed out after {self.timeout}s.")
         except requests.exceptions.ConnectionError as exc:
             raise RWSError(f"Connection failed: {exc}")
+        
         logger.debug(
             "Response HTTP %s — %d bytes",
             response.status_code,
@@ -136,16 +145,6 @@ class RWSClient:
     ) -> str:
         """
         Retrieve the raw ODM XML listing of sites for a given study.
-
-        Mirrors ``rwslib.rws_requests.odm_adapter.SitesMetadataRequest``::
-
-            SitesMetadataRequest(project_name=None, environment_name=None)
-
-        Calls::
-
-            GET /RaveWebServices/datasets/Sites.odm/?studyoid={project}({env})
-
-        Ref: https://rwslib.readthedocs.io/en/latest/odm_adapter.html
         """
         project_name, environment_name = _parse_study_oid(study_oid)
         studyoid_param = f"{project_name}({environment_name})"
@@ -182,26 +181,6 @@ class RWSClient:
     ) -> str:
         """
         Retrieve the raw ODM XML listing of subjects for a given study.
-
-        Mirrors ``rwslib.rws_requests.StudySubjectsRequest``::
-
-            StudySubjectsRequest(project_name, environment_name)
-
-        Calls::
-
-            GET /RaveWebServices/studies/{project}({env})/subjects
-
-        Each ``<SubjectData>`` in the response carries a
-        ``<SiteRef LocationOID="..."/>`` child, enabling client-side
-        filtering to a specific site.
-
-        Returns:
-            BOM-stripped XML suitable for ``ET.fromstring``.
-
-        Raises:
-            RWSError: On HTTP errors, auth failures, or network failures.
-
-        Ref: https://rwslib.readthedocs.io/en/latest/retrieve_clinical_data.html
         """
         project_name, environment_name = _parse_study_oid(study_oid)
         url = (
