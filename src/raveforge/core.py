@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 import uuid
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from xml.dom import minidom
 
 from .enums import ActionType, QueryRecipient, QueryStatus
@@ -110,14 +110,13 @@ class RaveTransaction:
         """Add or switch to a study event context."""
         if self._current_subject is None:
             raise HierarchyError("Subject context required before calling event().")
-        
+        effective_repeat_key = repeat_key
         events = self._subjects[self._current_subject]["Events"]
-        event_key = f"{event_oid}_{repeat_key}"
-        
+        event_key = f"{event_oid}_{effective_repeat_key}"
         if event_key not in events:
             events[event_key] = {
                 "OID": event_oid,
-                "RepeatKey": repeat_key,
+                "RepeatKey": effective_repeat_key,
                 "Action": action.value if action else None,
                 "Forms": {},
             }
@@ -135,17 +134,16 @@ class RaveTransaction:
         """Add or switch to a form context."""
         if self._current_event is None:
             raise HierarchyError("Event context required before calling form().")
-        
+        effective_repeat_key = repeat_key
         forms = (
             self._subjects[self._current_subject]
             ["Events"][self._current_event]["Forms"]
         )
-        form_key = f"{form_oid}_{repeat_key}"
-        
+        form_key = f"{form_oid}_{effective_repeat_key}"
         if form_key not in forms:
             forms[form_key] = {
                 "OID": form_oid,
-                "RepeatKey": repeat_key,
+                "RepeatKey": effective_repeat_key,
                 "Action": action.value if action else None,
                 "ItemGroups": {},
             }
@@ -163,18 +161,17 @@ class RaveTransaction:
         """Add or switch to an item group context."""
         if self._current_form is None:
             raise HierarchyError("Form context required before calling item_group().")
-        
+        effective_repeat_key = repeat_key
         groups = (
             self._subjects[self._current_subject]
             ["Events"][self._current_event]
             ["Forms"][self._current_form]["ItemGroups"]
         )
-        group_key = f"{item_group_oid}_{repeat_key}"
-        
+        group_key = f"{item_group_oid}_{effective_repeat_key}"
         if group_key not in groups:
             groups[group_key] = {
                 "OID": item_group_oid,
-                "RepeatKey": repeat_key,
+                "RepeatKey": effective_repeat_key,
                 "Action": action.value if action else None,
                 "SpecifiedItemsOnly": specified_items_only,
                 "Items": {},
@@ -242,7 +239,7 @@ class RaveTransaction:
     # Build
     # ------------------------------------------------------------------
 
-    def build(self, encoding: str = "UTF-8") -> Any:
+    def build(self, encoding: str = "UTF-8") -> Union[bytes, str]:
         """Serialise the transaction to ODM XML bytes."""
         root = ET.Element("ODM", {
             "xmlns": ODM_NS,
@@ -296,15 +293,11 @@ class RaveTransaction:
                             "ItemGroupOID": group_data["OID"]
                         }
                         if group_data["RepeatKey"] is not None:
-                            group_attribs["ItemGroupRepeatKey"] = (
-                                str(group_data["RepeatKey"])
-                            )
+                            group_attribs["ItemGroupRepeatKey"] = str(group_data["RepeatKey"])
                         if group_data["Action"]:
                             group_attribs["TransactionType"] = group_data["Action"]
                         if group_data["SpecifiedItemsOnly"]:
-                            group_attribs[f"{{{MDSOL_NS}}}Submission"] = (
-                                "SpecifiedItemsOnly"
-                            )
+                            group_attribs[f"{{{MDSOL_NS}}}Submission"] = "SpecifiedItemsOnly"
 
                         group_node = ET.SubElement(
                             form_node, "ItemGroupData", group_attribs
@@ -316,9 +309,7 @@ class RaveTransaction:
                                 item_attribs["Value"] = str(item_dict["Value"])
                             if item_dict["Specify"] is not None:
                                 specify_key = f"{{{MDSOL_NS}}}SpecifyValue"
-                                item_attribs[specify_key] = str(
-                                    item_dict["Specify"]
-                                )
+                                item_attribs[specify_key] = str(item_dict["Specify"])
 
                             item_node = ET.SubElement(
                                 group_node, "ItemData", item_attribs
@@ -337,8 +328,8 @@ class RaveTransaction:
 
         raw_data = ET.tostring(root, encoding=encoding, xml_declaration=True)
         
-        # Intercept string generation to enforce standard double-quotes for the RWS WAF
-        if isinstance(raw_data, bytes):
+        # Intercept byte generation to enforce standard double-quotes for the RWS WAF
+        if isinstance(raw_data, bytes) and encoding.lower() != "unicode":
             xml_str = raw_data.decode(encoding)
             if xml_str.startswith("<?xml"):
                 decl_end = xml_str.find(">")
