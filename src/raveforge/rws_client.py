@@ -73,6 +73,10 @@ class RWSClient:
         self.timeout = timeout
         self._session = requests.Session()
         self._session.auth = self.auth
+        # Do NOT set Content-Type in session headers here at all.
+        self._session.headers.update({
+            "Accept": "text/xml",
+        })
 
     def post_odm(
         self,
@@ -93,14 +97,13 @@ class RWSClient:
         url = f"{self.base_url}{endpoint}"
         logger.debug("POST %s", url)
 
-        # 2. Enforce exact headers proven to satisfy Medidata's strict WAF
+        # 2. Use standalone requests.post with the exact WAF-compliant header
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
             "Accept": "text/xml",
         }
 
         try:
-            # Use standalone requests.post (exactly like your successful test script)
             response = requests.post(
                 url,
                 data=odm_bytes,
