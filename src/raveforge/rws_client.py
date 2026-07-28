@@ -100,7 +100,7 @@ class RWSClient:
         }
 
         try:
-            # Use standalone requests.post to avoid session header reformatting quirks
+            # Use standalone requests.post (exactly like your successful test script)
             response = requests.post(
                 url,
                 data=odm_bytes,
