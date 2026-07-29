@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from copy import deepcopy
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
+from xml.dom import minidom
 
 from .enums import ActionType, QueryRecipient, QueryStatus
 from .exceptions import HierarchyError
@@ -19,84 +18,6 @@ _DEFAULT_REPEAT_KEY = "1"
 
 ET.register_namespace("", ODM_NS)
 ET.register_namespace("mdsol", MDSOL_NS)
-
-
-def _odm_tag(tag_name: str) -> str:
-    """Return a qualified CDISC ODM element name."""
-    return f"{{{ODM_NS}}}{tag_name}"
-
-
-def _mdsol_name(local_name: str) -> str:
-    """Return a qualified Medidata ODM extension name."""
-    return f"{{{MDSOL_NS}}}{local_name}"
-
-
-@dataclass
-class TransactionContext:
-    """Tracks the active builder position."""
-
-    subject_key: Optional[str] = None
-    event_key: Optional[tuple[str, Optional[str]]] = None
-    form_key: Optional[tuple[str, Optional[str]]] = None
-    group_key: Optional[tuple[str, Optional[str]]] = None
-
-
-@dataclass
-class QueryDetails:
-    """Optional Medidata query metadata for an item."""
-
-    text: str
-    status: QueryStatus = QueryStatus.OPEN
-    recipient: QueryRecipient = QueryRecipient.SITE_FROM_SYSTEM
-
-
-@dataclass
-class Item:
-    """A single ODM ItemData value and optional Medidata query."""
-
-    value: Optional[str] = None
-    specify: Optional[str] = None
-    query: Optional[QueryDetails] = None
-
-
-@dataclass
-class ItemGroup:
-    """An ODM ItemGroupData instance."""
-
-    oid: str
-    repeat_key: Optional[str]
-    action: Optional[ActionType] = None
-    specified_items_only: bool = False
-    items: dict[str, Item] = field(default_factory=dict)
-
-
-@dataclass
-class Form:
-    """An ODM FormData instance."""
-
-    oid: str
-    repeat_key: Optional[str]
-    action: Optional[ActionType] = None
-    item_groups: dict[tuple[str, Optional[str]], ItemGroup] = field(default_factory=dict)
-
-
-@dataclass
-class StudyEvent:
-    """An ODM StudyEventData instance."""
-
-    oid: str
-    repeat_key: Optional[str]
-    action: Optional[ActionType] = None
-    forms: dict[tuple[str, Optional[str]], Form] = field(default_factory=dict)
-
-
-@dataclass
-class Subject:
-    """An ODM SubjectData instance."""
-
-    site_oid: str
-    action: Optional[ActionType] = None
-    events: dict[tuple[str, Optional[str]], StudyEvent] = field(default_factory=dict)
 
 
 class RaveTransaction:
@@ -119,8 +40,14 @@ class RaveTransaction:
         self.study_oid = study_oid
         self.metadata_version_oid = metadata_version_oid
         self.file_oid = str(uuid4())
-        self._subjects: dict[str, Subject] = {}
-        self._context = TransactionContext()
+
+        self._subjects: dict[str, dict[str, Any]] = {}
+
+        self._current_subject: Optional[str] = None
+        self._current_site: Optional[str] = None
+        self._current_event: Optional[str] = None
+        self._current_form: Optional[str] = None
+        self._current_group: Optional[str] = None
 
     def __enter__(self) -> RaveTransaction:
         return self
@@ -139,17 +66,18 @@ class RaveTransaction:
         site_oid: str,
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
-        """Add or select a subject context."""
-        subject = self._subjects.get(subject_key)
+        """Add or revisit a subject context."""
+        if subject_key not in self._subjects:
+            self._subjects[subject_key] = {"Events": {}}
 
-        if subject is None:
-            subject = Subject(site_oid=site_oid, action=action)
-            self._subjects[subject_key] = subject
-        else:
-            subject.site_oid = site_oid
-            subject.action = action
+        self._subjects[subject_key]["SiteOID"] = site_oid
+        self._subjects[subject_key]["Action"] = action.value if action else None
 
-        self._context = TransactionContext(subject_key=subject_key)
+        self._current_subject = subject_key
+        self._current_site = site_oid
+        self._current_event = None
+        self._current_form = None
+        self._current_group = None
         return self
 
     def event(
@@ -158,24 +86,26 @@ class RaveTransaction:
         repeat_key: Optional[str] = _DEFAULT_REPEAT_KEY,
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
-        """Add or select a study-event context."""
-        subject = self._require_subject()
+        """Add or switch to a study event context."""
+        if self._current_subject is None:
+            raise HierarchyError("Subject context required before calling event().")
 
-        event_key = (event_oid, repeat_key)
-        event = subject.events.get(event_key)
+        events = self._subjects[self._current_subject]["Events"]
+        event_key = f"{event_oid}_{repeat_key}"
 
-        if event is None:
-            subject.events[event_key] = StudyEvent(
-                oid=event_oid,
-                repeat_key=repeat_key,
-                action=action,
-            )
+        if event_key not in events:
+            events[event_key] = {
+                "OID": event_oid,
+                "RepeatKey": repeat_key,
+                "Action": action.value if action else None,
+                "Forms": {},
+            }
         elif action is not None:
-            event.action = action
+            events[event_key]["Action"] = action.value
 
-        self._context.event_key = event_key
-        self._context.form_key = None
-        self._context.group_key = None
+        self._current_event = event_key
+        self._current_form = None
+        self._current_group = None
         return self
 
     def form(
@@ -184,23 +114,27 @@ class RaveTransaction:
         repeat_key: Optional[str] = _DEFAULT_REPEAT_KEY,
         action: Optional[ActionType] = None,
     ) -> RaveTransaction:
-        """Add or select a form context."""
-        event = self._require_event()
+        """Add or switch to a form context."""
+        if self._current_event is None or self._current_subject is None:
+            raise HierarchyError("Event context required before calling form().")
 
-        form_key = (form_oid, repeat_key)
-        form = event.forms.get(form_key)
+        forms = self._subjects[self._current_subject]["Events"][self._current_event][
+            "Forms"
+        ]
+        form_key = f"{form_oid}_{repeat_key}"
 
-        if form is None:
-            event.forms[form_key] = Form(
-                oid=form_oid,
-                repeat_key=repeat_key,
-                action=action,
-            )
+        if form_key not in forms:
+            forms[form_key] = {
+                "OID": form_oid,
+                "RepeatKey": repeat_key,
+                "Action": action.value if action else None,
+                "ItemGroups": {},
+            }
         elif action is not None:
-            form.action = action
+            forms[form_key]["Action"] = action.value
 
-        self._context.form_key = form_key
-        self._context.group_key = None
+        self._current_form = form_key
+        self._current_group = None
         return self
 
     def item_group(
@@ -210,53 +144,79 @@ class RaveTransaction:
         action: Optional[ActionType] = None,
         specified_items_only: bool = False,
     ) -> RaveTransaction:
-        """Add or select an item-group context."""
-        form = self._require_form()
+        """Add or switch to an item-group context."""
+        if (
+            self._current_subject is None
+            or self._current_event is None
+            or self._current_form is None
+        ):
+            raise HierarchyError("Form context required before calling item_group().")
 
-        group_key = (item_group_oid, repeat_key)
-        group = form.item_groups.get(group_key)
+        groups = self._subjects[self._current_subject]["Events"][self._current_event][
+            "Forms"
+        ][self._current_form]["ItemGroups"]
+        group_key = f"{item_group_oid}_{repeat_key}"
 
-        if group is None:
-            form.item_groups[group_key] = ItemGroup(
-                oid=item_group_oid,
-                repeat_key=repeat_key,
-                action=action,
-                specified_items_only=specified_items_only,
-            )
+        if group_key not in groups:
+            groups[group_key] = {
+                "OID": item_group_oid,
+                "RepeatKey": repeat_key,
+                "Action": action.value if action else None,
+                "SpecifiedItemsOnly": specified_items_only,
+                "Items": {},
+            }
         else:
             if action is not None:
-                group.action = action
-            group.specified_items_only = specified_items_only
+                groups[group_key]["Action"] = action.value
+            groups[group_key]["SpecifiedItemsOnly"] = specified_items_only
 
-        self._context.group_key = group_key
+        self._current_group = group_key
         return self
 
     def item(
         self,
         item_oid: str,
-        *,
         value: Optional[str] = None,
+        *,
         specify: Optional[str] = None,
-        query: Optional[QueryDetails] = None,
+        query: Optional[str] = None,
+        query_status: QueryStatus = QueryStatus.OPEN,
+        query_recipient: QueryRecipient = QueryRecipient.SITE_FROM_SYSTEM,
     ) -> RaveTransaction:
-        """Add or replace an item in the active item-group context."""
-        group = self._require_group()
+        """Add an item to the current item group."""
+        if (
+            self._current_subject is None
+            or self._current_event is None
+            or self._current_form is None
+            or self._current_group is None
+        ):
+            raise HierarchyError("ItemGroup context required before calling item().")
 
-        group.items[item_oid] = Item(
-            value=value,
-            specify=specify,
-            query=query,
-        )
+        items = self._subjects[self._current_subject]["Events"][self._current_event][
+            "Forms"
+        ][self._current_form]["ItemGroups"][self._current_group]["Items"]
+
+        items[item_oid] = {
+            "Value": value,
+            "Specify": specify,
+            "Query": query,
+            "QueryStatus": query_status.value,
+            "QueryRecipient": query_recipient.value,
+        }
         return self
 
     def reset_context(self) -> RaveTransaction:
         """Clear active builder context without discarding accumulated data."""
-        self._context = TransactionContext()
+        self._current_subject = None
+        self._current_site = None
+        self._current_event = None
+        self._current_form = None
+        self._current_group = None
         return self
 
     def reset(self) -> RaveTransaction:
         """Clear all transaction data and generate a new ODM FileOID."""
-        self._subjects.clear()
+        self._subjects = {}
         self.file_oid = str(uuid4())
         return self.reset_context()
 
@@ -267,183 +227,157 @@ class RaveTransaction:
         Pass ``encoding="unicode"`` to receive a string without an XML
         declaration. All other encodings return bytes with an XML declaration.
         """
-        root = self._build_xml_tree()
-
-        if encoding.lower() == "unicode":
-            return ET.tostring(root, encoding="unicode")
-
-        return ET.tostring(root, encoding=encoding, xml_declaration=True)
-
-    def build_pretty(self) -> str:
-        """
-        Serialize to human-readable, indented ODM XML.
-
-        The returned Unicode string intentionally does not include an XML
-        declaration and is intended for debugging or logging.
-        """
-        root = deepcopy(self._build_xml_tree())
-        ET.indent(root, space="  ")
-        return ET.tostring(root, encoding="unicode")
-
-    def _build_xml_tree(self) -> ET.Element:
-        """Create the complete ODM XML element tree."""
         root = ET.Element(
-            _odm_tag("ODM"),
+            "ODM",
             {
+                "xmlns": ODM_NS,
                 "FileType": "Transactional",
                 "FileOID": self.file_oid,
-                "CreationDateTime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+                "CreationDateTime": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%S"
+                ),
                 "ODMVersion": "1.3",
             },
         )
 
         clinical_data = ET.SubElement(
             root,
-            _odm_tag("ClinicalData"),
+            "ClinicalData",
             {
                 "StudyOID": self.study_oid,
                 "MetaDataVersionOID": self.metadata_version_oid,
             },
         )
 
-        for subject_key, subject in self._subjects.items():
-            self._build_subject_node(clinical_data, subject_key, subject)
+        for subject_key, subject_data in self._subjects.items():
+            self._build_subject_node(clinical_data, subject_key, subject_data)
 
-        return root
+        raw_data = ET.tostring(root, encoding=encoding, xml_declaration=True)
+
+        if isinstance(raw_data, bytes) and encoding.lower() != "unicode":
+            xml_str = raw_data.decode(encoding)
+            if xml_str.startswith("<?xml"):
+                decl_end = xml_str.find(">")
+                xml_str = (
+                    xml_str[: decl_end + 1].replace("'", '"')
+                    + xml_str[decl_end + 1 :]
+                )
+            return xml_str.encode(encoding)
+
+        return raw_data
+
+    def build_pretty(self) -> str:
+        """
+        Serialize to human-readable, indented XML.
+
+        Returns a Unicode string including an XML declaration.
+        Intended for debugging and logging.
+        """
+        raw = self.build(encoding="unicode")
+        parsed = minidom.parseString(raw)
+        return parsed.toprettyxml(indent="  ")
 
     def _build_subject_node(
         self,
         clinical_data: ET.Element,
         subject_key: str,
-        subject: Subject,
+        subject_data: dict[str, Any],
     ) -> None:
-        """Append an ODM SubjectData node and its descendants."""
-        attributes = {"SubjectKey": subject_key}
+        """Build the SubjectData node and descendants."""
+        subject_attributes: dict[str, str] = {"SubjectKey": subject_key}
 
-        if subject.action is not None:
-            attributes["TransactionType"] = subject.action.value
+        if subject_data.get("Action"):
+            subject_attributes["TransactionType"] = subject_data["Action"]
 
-        subject_node = ET.SubElement(
-            clinical_data,
-            _odm_tag("SubjectData"),
-            attributes,
-        )
+        subject_node = ET.SubElement(clinical_data, "SubjectData", subject_attributes)
         ET.SubElement(
             subject_node,
-            _odm_tag("SiteRef"),
-            {"LocationOID": subject.site_oid},
+            "SiteRef",
+            {"LocationOID": subject_data["SiteOID"]},
         )
 
-        for event in subject.events.values():
-            self._build_event_node(subject_node, event)
+        for event_data in subject_data["Events"].values():
+            event_attributes: dict[str, str] = {
+                "StudyEventOID": event_data["OID"],
+            }
 
-    def _build_event_node(self, subject_node: ET.Element, event: StudyEvent) -> None:
-        """Append an ODM StudyEventData node and its descendants."""
-        attributes = {"StudyEventOID": event.oid}
-
-        if event.repeat_key is not None:
-            attributes["StudyEventRepeatKey"] = event.repeat_key
-
-        if event.action is not None:
-            attributes["TransactionType"] = event.action.value
-
-        event_node = ET.SubElement(
-            subject_node,
-            _odm_tag("StudyEventData"),
-            attributes,
-        )
-
-        for form in event.forms.values():
-            self._build_form_node(event_node, form)
-
-    def _build_form_node(self, event_node: ET.Element, form: Form) -> None:
-        """Append an ODM FormData node and its descendants."""
-        attributes = {"FormOID": form.oid}
-
-        if form.repeat_key is not None:
-            attributes["FormRepeatKey"] = form.repeat_key
-
-        if form.action is not None:
-            attributes["TransactionType"] = form.action.value
-
-        form_node = ET.SubElement(
-            event_node,
-            _odm_tag("FormData"),
-            attributes,
-        )
-
-        for group in form.item_groups.values():
-            self._build_item_group_node(form_node, group)
-
-    def _build_item_group_node(self, form_node: ET.Element, group: ItemGroup) -> None:
-        """Append an ODM ItemGroupData node and its item data."""
-        attributes = {"ItemGroupOID": group.oid}
-
-        if group.repeat_key is not None:
-            attributes["ItemGroupRepeatKey"] = group.repeat_key
-
-        if group.action is not None:
-            attributes["TransactionType"] = group.action.value
-
-        if group.specified_items_only:
-            attributes[_mdsol_name("Submission")] = "SpecifiedItemsOnly"
-
-        group_node = ET.SubElement(
-            form_node,
-            _odm_tag("ItemGroupData"),
-            attributes,
-        )
-
-        for item_oid, item in group.items.items():
-            item_attributes = {"ItemOID": item_oid}
-
-            if item.value is not None:
-                item_attributes["Value"] = str(item.value)
-
-            if item.specify is not None:
-                item_attributes[_mdsol_name("SpecifyValue")] = str(item.specify)
-
-            item_node = ET.SubElement(
-                group_node,
-                _odm_tag("ItemData"),
-                item_attributes,
-            )
-
-            if item.query is not None:
-                ET.SubElement(
-                    item_node,
-                    _mdsol_name("Query"),
-                    {
-                        "Value": item.query.text,
-                        "Status": item.query.status.value,
-                        "Recipient": item.query.recipient.value,
-                    },
+            if event_data["RepeatKey"] is not None:
+                event_attributes["StudyEventRepeatKey"] = str(
+                    event_data["RepeatKey"]
                 )
 
-    def _require_subject(self) -> Subject:
-        """Return the active subject or raise a hierarchy error."""
-        if self._context.subject_key is None:
-            raise HierarchyError("Subject context required before calling event().")
+            if event_data.get("Action"):
+                event_attributes["TransactionType"] = event_data["Action"]
 
-        return self._subjects[self._context.subject_key]
+            event_node = ET.SubElement(
+                subject_node,
+                "StudyEventData",
+                event_attributes,
+            )
 
-    def _require_event(self) -> StudyEvent:
-        """Return the active event or raise a hierarchy error."""
-        if self._context.event_key is None:
-            raise HierarchyError("Event context required before calling form().")
+            for form_data in event_data["Forms"].values():
+                self._build_form_node(event_node, form_data)
 
-        return self._require_subject().events[self._context.event_key]
+    def _build_form_node(
+        self,
+        event_node: ET.Element,
+        form_data: dict[str, Any],
+    ) -> None:
+        """Build the FormData node and descendants."""
+        form_attributes: dict[str, str] = {"FormOID": form_data["OID"]}
 
-    def _require_form(self) -> Form:
-        """Return the active form or raise a hierarchy error."""
-        if self._context.form_key is None:
-            raise HierarchyError("Form context required before calling item_group().")
+        if form_data["RepeatKey"] is not None:
+            form_attributes["FormRepeatKey"] = str(form_data["RepeatKey"])
 
-        return self._require_event().forms[self._context.form_key]
+        if form_data.get("Action"):
+            form_attributes["TransactionType"] = form_data["Action"]
 
-    def _require_group(self) -> ItemGroup:
-        """Return the active item group or raise a hierarchy error."""
-        if self._context.group_key is None:
-            raise HierarchyError("ItemGroup context required before calling item().")
+        form_node = ET.SubElement(event_node, "FormData", form_attributes)
 
-        return self._require_form().item_groups[self._context.group_key]
+        for group_data in form_data["ItemGroups"].values():
+            self._build_item_group_node(form_node, group_data)
+
+    def _build_item_group_node(
+        self,
+        form_node: ET.Element,
+        group_data: dict[str, Any],
+    ) -> None:
+        """Build the ItemGroupData node and descendants."""
+        group_attributes: dict[str, str] = {
+            "ItemGroupOID": group_data["OID"],
+        }
+
+        if group_data["RepeatKey"] is not None:
+            group_attributes["ItemGroupRepeatKey"] = str(group_data["RepeatKey"])
+
+        if group_data.get("Action"):
+            group_attributes["TransactionType"] = group_data["Action"]
+
+        if group_data["SpecifiedItemsOnly"]:
+            group_attributes[f"{{{MDSOL_NS}}}Submission"] = "SpecifiedItemsOnly"
+
+        group_node = ET.SubElement(form_node, "ItemGroupData", group_attributes)
+
+        for item_oid, item_data in group_data["Items"].items():
+            item_attributes: dict[str, str] = {"ItemOID": item_oid}
+
+            if item_data["Value"] is not None:
+                item_attributes["Value"] = str(item_data["Value"])
+
+            if item_data["Specify"] is not None:
+                item_attributes[f"{{{MDSOL_NS}}}SpecifyValue"] = str(
+                    item_data["Specify"]
+                )
+
+            item_node = ET.SubElement(group_node, "ItemData", item_attributes)
+
+            if item_data["Query"]:
+                ET.SubElement(
+                    item_node,
+                    f"{{{MDSOL_NS}}}Query",
+                    {
+                        "Value": str(item_data["Query"]),
+                        "Status": item_data["QueryStatus"],
+                        "Recipient": item_data["QueryRecipient"],
+                    },
+                )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 
 import requests
 from requests.auth import HTTPBasicAuth
@@ -16,40 +16,12 @@ _LOGIN_PAGE_MARKERS = (
     "Medidata Classic Rave",
 )
 
-# Matches OIDs of the form  ProjectName(EnvironmentName)
-_OID_RE = re.compile(r"^(.+?)\((.+)\)$")
-
 logger = logging.getLogger(__name__)
-
-
-def _parse_study_oid(study_oid: str) -> Tuple[str, str]:
-    """
-    Split a Rave study OID into ``(project_name, environment_name)``.
-
-    rwslib's ``SitesMetadataRequest`` and ``StudySubjectsRequest`` are both
-    defined with separate ``project_name`` / ``environment_name`` parameters::
-
-        SitesMetadataRequest(project_name=None, environment_name=None)
-        StudySubjectsRequest(project_name, environment_name)
-
-    so the OID ``Mediflex(Dev)`` must be parsed into
-    ``project_name="Mediflex"`` and ``environment_name="Dev"`` before use.
-
-    Raises:
-        RWSError: If the OID does not match the expected ``Project(Env)`` format.
-    """
-    m = _OID_RE.match(study_oid)
-    if not m:
-        raise RWSError(
-            f"Invalid study OID {study_oid!r}. "
-            "Expected format: ProjectName(EnvironmentName), e.g. Mediflex(Dev)."
-        )
-    return m.group(1), m.group(2)
 
 
 class RWSClient:
     """
-    Thin HTTP client for submitting ODM XML to Medidata Rave Web Services (RWS).
+    Thin HTTP client for submitting ODM XML to Medidata Rave Web Services.
 
     Usage::
 
@@ -73,20 +45,14 @@ class RWSClient:
         self.timeout = timeout
         self._session = requests.Session()
         self._session.auth = self.auth
-        # Do NOT set Content-Type in session headers here at all.
-        self._session.headers.update(
-            {
-                "Accept": "text/xml",
-            }
-        )
+        self._session.headers.update({"Accept": "text/xml"})
 
     def post_odm(
         self,
         transaction_or_xml: Union[RaveTransaction, str, bytes],
         endpoint: str = "/RaveWebServices/webservice.aspx?PostODMClinicalData",
     ) -> str:
-
-        # 1. Normalize input to bytes for HTTP transmission
+        """Submit ODM XML to RWS and return the raw response text."""
         if isinstance(transaction_or_xml, RaveTransaction):
             odm_bytes = transaction_or_xml.build()
         elif isinstance(transaction_or_xml, str):
@@ -99,24 +65,24 @@ class RWSClient:
         url = f"{self.base_url}{endpoint}"
         logger.debug("POST %s", url)
 
-        # 2. Use standalone requests.post with the exact WAF-compliant header
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
             "Accept": "text/xml",
         }
 
         try:
-            response = requests.post(
+            response = self._session.post(
                 url,
                 data=odm_bytes,
                 headers=headers,
-                auth=self.auth,
                 timeout=self.timeout,
             )
-        except requests.exceptions.Timeout:
-            raise RWSError(f"Request timed out after {self.timeout}s.")
+        except requests.exceptions.Timeout as exc:
+            raise RWSError(f"Request timed out after {self.timeout}s.") from exc
         except requests.exceptions.ConnectionError as exc:
-            raise RWSError(f"Connection failed: {exc}")
+            raise RWSError(f"Connection failed: {exc}") from exc
+        except requests.exceptions.RequestException as exc:
+            raise RWSError(f"Request failed: {exc}") from exc
 
         logger.debug(
             "Response HTTP %s — %d bytes",
@@ -129,14 +95,19 @@ class RWSClient:
         self,
         endpoint: str = "/RaveWebServices/studies",
     ) -> str:
+        """Retrieve the raw studies XML."""
         url = f"{self.base_url}{endpoint}"
         logger.debug("GET %s", url)
+
         try:
             response = self._session.get(url, timeout=self.timeout)
-        except requests.exceptions.Timeout:
-            raise RWSError(f"Request timed out after {self.timeout}s.")
+        except requests.exceptions.Timeout as exc:
+            raise RWSError(f"Request timed out after {self.timeout}s.") from exc
         except requests.exceptions.ConnectionError as exc:
-            raise RWSError(f"Connection failed: {exc}")
+            raise RWSError(f"Connection failed: {exc}") from exc
+        except requests.exceptions.RequestException as exc:
+            raise RWSError(f"Request failed: {exc}") from exc
+
         logger.debug(
             "get_studies_raw: HTTP %s — %d bytes",
             response.status_code,
@@ -144,86 +115,71 @@ class RWSClient:
         )
         return self._handle_response(response)
 
-    def get_sites_raw(
-        self,
-        study_oid: str,
-    ) -> str:
-        """
-        Retrieve the raw ODM XML listing of sites for a given study.
-        """
-        project_name, environment_name = _parse_study_oid(study_oid)
-        studyoid_param = f"{project_name}({environment_name})"
+    def get_sites_raw(self, study_oid: str) -> str:
+        """Retrieve the raw ODM XML listing of sites for a given study."""
         url = f"{self.base_url}/RaveWebServices/datasets/Sites.odm/"
-        logger.debug(
-            "get_sites_raw: project=%r env=%r → GET %s?studyoid=%s",
-            project_name,
-            environment_name,
-            url,
-            studyoid_param,
-        )
+        logger.debug("get_sites_raw: GET %s?studyoid=%s", url, study_oid)
+
         try:
             response = self._session.get(
                 url,
-                params={"studyoid": studyoid_param},
+                params={"studyoid": study_oid},
                 timeout=self.timeout,
             )
-        except requests.exceptions.Timeout:
-            raise RWSError(f"Request timed out after {self.timeout}s.")
+        except requests.exceptions.Timeout as exc:
+            raise RWSError(f"Request timed out after {self.timeout}s.") from exc
         except requests.exceptions.ConnectionError as exc:
-            raise RWSError(f"Connection failed: {exc}")
+            raise RWSError(f"Connection failed: {exc}") from exc
+        except requests.exceptions.RequestException as exc:
+            raise RWSError(f"Request failed: {exc}") from exc
+
         logger.debug(
-            "get_sites_raw (project=%r env=%r): HTTP %s — %d bytes",
-            project_name,
-            environment_name,
+            "get_sites_raw: HTTP %s — %d bytes",
             response.status_code,
             len(response.content),
         )
         return self._handle_response(response)
 
-    def get_subjects_raw(
-        self,
-        study_oid: str,
-    ) -> str:
-        """
-        Retrieve the raw ODM XML listing of subjects for a given study.
-        """
-        project_name, environment_name = _parse_study_oid(study_oid)
-        url = f"{self.base_url}/RaveWebServices/studies/{project_name}({environment_name})/subjects"
-        logger.debug(
-            "get_subjects_raw: project=%r env=%r → GET %s",
-            project_name,
-            environment_name,
-            url,
-        )
+    def get_subjects_raw(self, study_oid: str) -> str:
+        """Retrieve the raw ODM XML listing of subjects for a given study."""
+        url = f"{self.base_url}/RaveWebServices/studies/{study_oid}/subjects"
+        logger.debug("get_subjects_raw: GET %s", url)
+
         try:
             response = self._session.get(url, timeout=self.timeout)
-        except requests.exceptions.Timeout:
-            raise RWSError(f"Request timed out after {self.timeout}s.")
+        except requests.exceptions.Timeout as exc:
+            raise RWSError(f"Request timed out after {self.timeout}s.") from exc
         except requests.exceptions.ConnectionError as exc:
-            raise RWSError(f"Connection failed: {exc}")
+            raise RWSError(f"Connection failed: {exc}") from exc
+        except requests.exceptions.RequestException as exc:
+            raise RWSError(f"Request failed: {exc}") from exc
+
         logger.debug(
-            "get_subjects_raw (project=%r env=%r): HTTP %s — %d bytes",
-            project_name,
-            environment_name,
+            "get_subjects_raw: HTTP %s — %d bytes",
             response.status_code,
             len(response.content),
         )
         return self._handle_response(response)
 
     def ping(self) -> bool:
+        """Check whether the RWS endpoint appears reachable."""
         try:
             url = f"{self.base_url}/RaveWebServices/webservice.aspx?GetVersion"
-            r = self._session.get(url, timeout=self.timeout)
-            if r.status_code == 401:
+            response = self._session.get(url, timeout=self.timeout)
+
+            if response.status_code == 401:
                 return True
-            if r.status_code == 200:
-                r.encoding = "utf-8-sig"
-                return not self._is_login_page(r.text)
+
+            if response.status_code == 200:
+                response.encoding = "utf-8-sig"
+                return not self._is_login_page(response.text)
+
             return False
         except requests.exceptions.RequestException:
             return False
 
     def _handle_response(self, response: requests.Response) -> str:
+        """Convert an HTTP response into text or RWSError."""
         response.encoding = "utf-8-sig"
         body = response.text
 
@@ -234,6 +190,7 @@ class RWSClient:
                     "Check your username and password.",
                     http_status=401,
                 )
+
             if "<IsTransactionSuccessful>false</IsTransactionSuccessful>" in body:
                 rws_code = self._extract_rws_code(body)
                 raise RWSError(
@@ -241,6 +198,7 @@ class RWSClient:
                     rws_code=rws_code,
                     http_status=200,
                 )
+
             return body
 
         rws_messages = {
@@ -250,20 +208,31 @@ class RWSClient:
             404: "Not Found — check study OID or endpoint URL.",
             409: "Conflict — transaction violates study configuration.",
         }
-        message = rws_messages.get(response.status_code, f"Unexpected HTTP {response.status_code}.")
+        message = rws_messages.get(
+            response.status_code,
+            f"Unexpected HTTP {response.status_code}.",
+        )
         rws_code = self._extract_rws_code(body)
-        raise RWSError(message, rws_code=rws_code, http_status=response.status_code)
+        raise RWSError(
+            message,
+            rws_code=rws_code,
+            http_status=response.status_code,
+        )
 
     @staticmethod
     def _is_login_page(body: str) -> bool:
+        """Return True if the body looks like an RWS login page."""
         return any(marker in body for marker in _LOGIN_PAGE_MARKERS)
 
     @staticmethod
     def _extract_rws_code(body: str) -> Optional[str]:
+        """Extract an RWS error code from the response body when present."""
         match = re.search(r'ErrorClientResponseMessage="([^"]+)"', body)
         if match:
             return match.group(1)
+
         match = re.search(r"<ErrorDescription>(.*?)</ErrorDescription>", body)
         if match:
             return match.group(1)
+
         return None
