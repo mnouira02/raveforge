@@ -74,16 +74,18 @@ class RWSClient:
         self._session = requests.Session()
         self._session.auth = self.auth
         # Do NOT set Content-Type in session headers here at all.
-        self._session.headers.update({
-            "Accept": "text/xml",
-        })
+        self._session.headers.update(
+            {
+                "Accept": "text/xml",
+            }
+        )
 
     def post_odm(
         self,
         transaction_or_xml: Union[RaveTransaction, str, bytes],
         endpoint: str = "/RaveWebServices/webservice.aspx?PostODMClinicalData",
     ) -> str:
-        
+
         # 1. Normalize input to bytes for HTTP transmission
         if isinstance(transaction_or_xml, RaveTransaction):
             odm_bytes = transaction_or_xml.build()
@@ -186,10 +188,7 @@ class RWSClient:
         Retrieve the raw ODM XML listing of subjects for a given study.
         """
         project_name, environment_name = _parse_study_oid(study_oid)
-        url = (
-            f"{self.base_url}/RaveWebServices/studies"
-            f"/{project_name}({environment_name})/subjects"
-        )
+        url = f"{self.base_url}/RaveWebServices/studies/{project_name}({environment_name})/subjects"
         logger.debug(
             "get_subjects_raw: project=%r env=%r → GET %s",
             project_name,
@@ -251,9 +250,7 @@ class RWSClient:
             404: "Not Found — check study OID or endpoint URL.",
             409: "Conflict — transaction violates study configuration.",
         }
-        message = rws_messages.get(
-            response.status_code, f"Unexpected HTTP {response.status_code}."
-        )
+        message = rws_messages.get(response.status_code, f"Unexpected HTTP {response.status_code}.")
         rws_code = self._extract_rws_code(body)
         raise RWSError(message, rws_code=rws_code, http_status=response.status_code)
 

@@ -116,9 +116,7 @@ class RaveDiagnostics:
         studies = []
         for study_el in root.findall(f"{{{ODM_NS}}}Study"):
             oid = study_el.get("OID", "")
-            name_el = study_el.find(
-                f"{{{ODM_NS}}}GlobalVariables/{{{ODM_NS}}}StudyName"
-            )
+            name_el = study_el.find(f"{{{ODM_NS}}}GlobalVariables/{{{ODM_NS}}}StudyName")
             name = name_el.text if (name_el is not None and name_el.text) else oid
             studies.append({"oid": oid, "name": name})
         return studies
@@ -373,7 +371,7 @@ class RaveDiagnostics:
             recommendation=(
                 "Confirm the exact StudyOID using RaveDiagnostics.get_studies(). "
                 "OIDs are case-sensitive and must include the environment suffix, "
-                'e.g. \'Mediflex(Dev)\'.',
+                "e.g. 'Mediflex(Dev)'.",
             ),
             safe_to_retry=False,
         )

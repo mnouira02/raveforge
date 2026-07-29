@@ -1,4 +1,5 @@
 """Tests for the ODM validation layer (raveforge.validator)."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,15 +11,16 @@ from raveforge.validator import Severity, ValidationIssue
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _minimal_valid_tx() -> RaveTransaction:
     """Return the simplest possible transaction that passes all rules."""
     tx = RaveTransaction("STUDY_01")
     (
         tx.subject("SUBJ-001", "SITE-01")
-          .event("VISIT_1")
-          .form("DM")
-          .item_group("DM_IG")
-          .item("AGE", value="34")
+        .event("VISIT_1")
+        .form("DM")
+        .item_group("DM_IG")
+        .item("AGE", value="34")
     )
     return tx
 
@@ -26,6 +28,7 @@ def _minimal_valid_tx() -> RaveTransaction:
 # ---------------------------------------------------------------------------
 # validate() happy path
 # ---------------------------------------------------------------------------
+
 
 def test_validate_returns_empty_issues_for_valid_tx():
     """A fully-formed transaction with strict=True raises nothing."""
@@ -44,6 +47,7 @@ def test_validate_does_not_mutate_transaction():
 # ---------------------------------------------------------------------------
 # STUDY_OID_EMPTY
 # ---------------------------------------------------------------------------
+
 
 def test_validate_raises_on_empty_study_oid():
     tx = RaveTransaction("")
@@ -85,6 +89,7 @@ def test_validate_raises_on_study_oid_with_ampersand():
 # NO_SUBJECTS (WARNING promoted to error in strict mode)
 # ---------------------------------------------------------------------------
 
+
 def test_validate_strict_raises_on_no_subjects():
     tx = RaveTransaction("STUDY_01")
     with pytest.raises(ValidationError) as exc_info:
@@ -109,6 +114,7 @@ def test_validate_no_subjects_is_warning_severity():
 # SUBJECT_KEY_EMPTY
 # ---------------------------------------------------------------------------
 
+
 def test_validate_raises_on_empty_subject_key():
     """A subject with an empty SubjectKey should fail."""
     tx = RaveTransaction("STUDY_01")
@@ -130,6 +136,7 @@ def test_validate_raises_on_whitespace_subject_key():
 # SUBJECT_KEY_INVALID_CHARS
 # ---------------------------------------------------------------------------
 
+
 def test_validate_raises_on_subject_key_with_invalid_chars():
     """A subject key containing XML-illegal characters should fail."""
     tx = RaveTransaction("STUDY_01")
@@ -144,6 +151,7 @@ def test_validate_raises_on_subject_key_with_invalid_chars():
 # ---------------------------------------------------------------------------
 # SITE_OID_EMPTY
 # ---------------------------------------------------------------------------
+
 
 def test_validate_raises_on_empty_site_oid():
     """Subjects added with an empty SiteOID should fail."""
@@ -165,6 +173,7 @@ def test_validate_raises_on_whitespace_site_oid():
 # ---------------------------------------------------------------------------
 # SUBJECT_NO_EVENTS (WARNING)
 # ---------------------------------------------------------------------------
+
 
 def test_validate_warns_on_subject_with_no_events_in_strict():
     tx = RaveTransaction("STUDY_01")
@@ -196,6 +205,7 @@ def test_validate_subject_no_events_location_contains_subject_key():
 # EVENT_OID_EMPTY
 # ---------------------------------------------------------------------------
 
+
 def test_validate_raises_on_empty_event_oid():
     """An event with an empty OID should fail."""
     tx = RaveTransaction("STUDY_01")
@@ -216,6 +226,7 @@ def test_validate_raises_on_whitespace_event_oid():
 # ---------------------------------------------------------------------------
 # EVENT_NO_FORMS (WARNING)
 # ---------------------------------------------------------------------------
+
 
 def test_validate_warns_on_event_with_no_forms():
     tx = RaveTransaction("STUDY_01")
@@ -247,6 +258,7 @@ def test_validate_event_no_forms_location_contains_event_oid():
 # FORM_OID_EMPTY
 # ---------------------------------------------------------------------------
 
+
 def test_validate_raises_on_empty_form_oid():
     """A form with an empty OID should fail."""
     tx = RaveTransaction("STUDY_01")
@@ -267,6 +279,7 @@ def test_validate_raises_on_whitespace_form_oid():
 # ---------------------------------------------------------------------------
 # FORM_NO_ITEM_GROUPS (WARNING)
 # ---------------------------------------------------------------------------
+
 
 def test_validate_warns_on_form_with_no_item_groups():
     tx = RaveTransaction("STUDY_01")
@@ -298,6 +311,7 @@ def test_validate_form_no_item_groups_location_contains_form_oid():
 # ITEM_GROUP_OID_EMPTY
 # ---------------------------------------------------------------------------
 
+
 def test_validate_raises_on_empty_item_group_oid():
     """An item group with an empty OID should fail."""
     tx = RaveTransaction("STUDY_01")
@@ -318,6 +332,7 @@ def test_validate_raises_on_whitespace_item_group_oid():
 # ---------------------------------------------------------------------------
 # ITEM_GROUP_NO_ITEMS (WARNING)
 # ---------------------------------------------------------------------------
+
 
 def test_validate_warns_on_item_group_with_no_items_strict():
     """An item group with no items raises in strict mode."""
@@ -351,6 +366,7 @@ def test_validate_item_group_no_items_location_contains_group_oid():
 # ITEM_OID_EMPTY
 # ---------------------------------------------------------------------------
 
+
 def test_validate_raises_on_empty_item_oid():
     """An item with an empty OID should fail."""
     tx = RaveTransaction("STUDY_01")
@@ -371,6 +387,7 @@ def test_validate_raises_on_whitespace_item_oid():
 # ---------------------------------------------------------------------------
 # ITEM_NO_VALUE (WARNING)
 # ---------------------------------------------------------------------------
+
 
 def test_validate_warns_on_item_with_no_value_no_specify_no_query():
     tx = RaveTransaction("STUDY_01")
@@ -394,10 +411,10 @@ def test_validate_item_with_specify_does_not_warn():
     tx = RaveTransaction("STUDY_01")
     (
         tx.subject("SUBJ-001", "SITE-01")
-          .event("V1")
-          .form("DM")
-          .item_group("G1")
-          .item("RACE", specify="Mixed")
+        .event("V1")
+        .form("DM")
+        .item_group("G1")
+        .item("RACE", specify="Mixed")
     )
     issues = validate(tx, strict=False)
     assert not any(i.code == "ITEM_NO_VALUE" for i in issues)
@@ -408,10 +425,10 @@ def test_validate_item_with_query_does_not_warn():
     tx = RaveTransaction("STUDY_01")
     (
         tx.subject("SUBJ-001", "SITE-01")
-          .event("V1")
-          .form("DM")
-          .item_group("G1")
-          .item("AGE", query="Please clarify.")
+        .event("V1")
+        .form("DM")
+        .item_group("G1")
+        .item("AGE", query="Please clarify.")
     )
     issues = validate(tx, strict=False)
     assert not any(i.code == "ITEM_NO_VALUE" for i in issues)
@@ -430,6 +447,7 @@ def test_validate_item_no_value_location_contains_item_oid():
 # Multiple issues collected in one pass
 # ---------------------------------------------------------------------------
 
+
 def test_validate_collects_all_issues_before_raising():
     """Validate aggregates every problem rather than stopping at the first."""
     tx = RaveTransaction("STUDY<01")  # STUDY_OID_INVALID_CHARS
@@ -444,8 +462,8 @@ def test_validate_collects_all_issues_before_raising():
 def test_validate_multiple_subjects_all_issues_collected():
     """Issues across multiple subjects are all collected in a single pass."""
     tx = RaveTransaction("STUDY_01")
-    tx.subject("SUBJ-001", "")   # SITE_OID_EMPTY
-    tx.subject("", "SITE-01")    # SUBJECT_KEY_EMPTY
+    tx.subject("SUBJ-001", "")  # SITE_OID_EMPTY
+    tx.subject("", "SITE-01")  # SUBJECT_KEY_EMPTY
     with pytest.raises(ValidationError) as exc_info:
         validate(tx)
     codes = [i.code for i in exc_info.value.issues]
@@ -456,6 +474,7 @@ def test_validate_multiple_subjects_all_issues_collected():
 # ---------------------------------------------------------------------------
 # ValidationIssue.__str__
 # ---------------------------------------------------------------------------
+
 
 def test_validation_issue_str_with_location():
     issue = ValidationIssue(
@@ -487,6 +506,7 @@ def test_validation_issue_str_without_location():
 # ValidationError carries issues
 # ---------------------------------------------------------------------------
 
+
 def test_validation_error_issues_attribute_is_populated():
     tx = RaveTransaction("")
     with pytest.raises(ValidationError) as exc_info:
@@ -498,6 +518,7 @@ def test_validation_error_issues_attribute_is_populated():
 # ---------------------------------------------------------------------------
 # strict=False vs strict=True
 # ---------------------------------------------------------------------------
+
 
 def test_strict_false_returns_warnings_without_raising():
     """strict=False should return warnings as issues but not raise."""

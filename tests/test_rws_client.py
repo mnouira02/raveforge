@@ -86,10 +86,7 @@ def test_post_odm_success_with_custom_endpoint(mock_post):
     mock_post.assert_called_once()
 
     args, kwargs = mock_post.call_args
-    assert args[0] == (
-        "https://innovate.mdsol.com"
-        "/RaveWebServices/custom.aspx?PostODMClinicalData"
-    )
+    assert args[0] == ("https://innovate.mdsol.com/RaveWebServices/custom.aspx?PostODMClinicalData")
     assert kwargs["data"] == odm_bytes
 
 
@@ -245,8 +242,8 @@ def test_post_odm_raises_when_rws_error_is_embedded_in_200(mock_post):
         text=(
             '<Response ReferenceNumber="123" '
             'ErrorClientResponseMessage="RWS00037">'
-            '<IsTransactionSuccessful>false</IsTransactionSuccessful>'
-            '</Response>'
+            "<IsTransactionSuccessful>false</IsTransactionSuccessful>"
+            "</Response>"
         ),
     )
 

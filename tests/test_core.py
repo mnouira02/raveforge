@@ -118,7 +118,10 @@ def test_multiple_items_in_group():
     """Validates that multiple items can be added to the same item group."""
     tx = RaveTransaction(study_oid="Test_Study")
     (
-        tx.subject("S-1", "Site-1").event("E-1").form("F-1").item_group("IG-1")
+        tx.subject("S-1", "Site-1")
+        .event("E-1")
+        .form("F-1")
+        .item_group("IG-1")
         .item("WEIGHT", "75")
         .item("HEIGHT", "180")
     )
@@ -167,9 +170,7 @@ def test_item_with_specify_value():
     assert item is not None
     assert item.attrib["ItemOID"] == "CMTRT"
     assert item.attrib["Value"] == "OTHER"
-    assert (
-        item.attrib[qname(MDSOL_NS, "SpecifyValue")] == "Investigational Vitamin Blend"
-    )
+    assert item.attrib[qname(MDSOL_NS, "SpecifyValue")] == "Investigational Vitamin Blend"
 
 
 def test_item_with_query_metadata():
@@ -193,10 +194,7 @@ def test_item_with_query_metadata():
     query_node = root.find(f".//{qname(MDSOL_NS, 'Query')}")
 
     assert query_node is not None
-    assert (
-        query_node.attrib["Value"]
-        == "Please confirm whether this was measured orally."
-    )
+    assert query_node.attrib["Value"] == "Please confirm whether this was measured orally."
     assert query_node.attrib["Status"] == "Open"
     assert query_node.attrib["Recipient"] == "Site from DM"
 
@@ -204,13 +202,7 @@ def test_item_with_query_metadata():
 def test_context_manager_support():
     """Validates the transaction can be used with a context manager."""
     with RaveTransaction("Test_Study") as tx:
-        (
-            tx.subject("S-1", "Site-1")
-            .event("E-1")
-            .form("F-1")
-            .item_group("IG-1")
-            .item("I-1", "V-1")
-        )
+        (tx.subject("S-1", "Site-1").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1"))
 
     root = ET.fromstring(tx.build())
     item = root.find(f".//{qname(ODM_NS, 'ItemData')}")
@@ -223,13 +215,7 @@ def test_context_manager_support():
 def test_subject_revisit_updates_site_oid():
     """Validates that calling subject() again with a new SiteOID updates it correctly."""
     tx = RaveTransaction("Test_Study")
-    (
-        tx.subject("S-1", "SITE-A")
-        .event("E-1")
-        .form("F-1")
-        .item_group("IG-1")
-        .item("I-1", "V-1")
-    )
+    (tx.subject("S-1", "SITE-A").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1"))
     tx.subject("S-1", "SITE-B")
 
     root = ET.fromstring(tx.build())
@@ -242,13 +228,7 @@ def test_subject_revisit_updates_site_oid():
 def test_subject_revisit_preserves_events():
     """Validates that revisiting a subject does not discard its accumulated events."""
     tx = RaveTransaction("Test_Study")
-    (
-        tx.subject("S-1", "SITE-A")
-        .event("E-1")
-        .form("F-1")
-        .item_group("IG-1")
-        .item("I-1", "V-1")
-    )
+    (tx.subject("S-1", "SITE-A").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1"))
     tx.subject("S-1", "SITE-B")
 
     root = ET.fromstring(tx.build())
@@ -310,13 +290,7 @@ def test_hierarchy_enforcement_item_without_group():
 def test_reset_context_clears_only_current_pointers():
     """Validates reset_context clears active pointers but keeps accumulated data."""
     tx = RaveTransaction("Test_Study")
-    (
-        tx.subject("S-1", "SITE-A")
-        .event("E-1")
-        .form("F-1")
-        .item_group("IG-1")
-        .item("I-1", "V-1")
-    )
+    (tx.subject("S-1", "SITE-A").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1"))
     tx.reset_context()
 
     root = ET.fromstring(tx.build())
@@ -330,13 +304,7 @@ def test_reset_context_clears_only_current_pointers():
 def test_reset_clears_everything():
     """Validates reset() wipes all accumulated data and context."""
     tx = RaveTransaction("Test_Study")
-    (
-        tx.subject("S-1", "SITE-A")
-        .event("E-1")
-        .form("F-1")
-        .item_group("IG-1")
-        .item("I-1", "V-1")
-    )
+    (tx.subject("S-1", "SITE-A").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1"))
     tx.reset()
 
     root = ET.fromstring(tx.build())
@@ -352,20 +320,8 @@ def test_reset_clears_everything():
 def test_multi_subject_batch():
     """Validates that multiple subjects can be added in a single transaction."""
     tx = RaveTransaction("Test_Study")
-    (
-        tx.subject("S-1", "Site-1")
-        .event("E-1")
-        .form("F-1")
-        .item_group("IG-1")
-        .item("I-1", "V-1")
-    )
-    (
-        tx.subject("S-2", "Site-1")
-        .event("E-1")
-        .form("F-1")
-        .item_group("IG-1")
-        .item("I-1", "V-2")
-    )
+    (tx.subject("S-1", "Site-1").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-1"))
+    (tx.subject("S-2", "Site-1").event("E-1").form("F-1").item_group("IG-1").item("I-1", "V-2"))
 
     root = ET.fromstring(tx.build())
     subjects = root.findall(f".//{qname(ODM_NS, 'SubjectData')}")

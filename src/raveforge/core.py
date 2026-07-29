@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
-import xml.etree.ElementTree as ET
 
 from .enums import ActionType, QueryRecipient, QueryStatus
 from .exceptions import HierarchyError
-
 
 MDSOL_NS = "http://www.mdsol.com/ns/odm/metadata"
 ODM_NS = "http://www.cdisc.org/ns/odm/v1.3"
@@ -78,9 +77,7 @@ class Form:
     oid: str
     repeat_key: Optional[str]
     action: Optional[ActionType] = None
-    item_groups: dict[tuple[str, Optional[str]], ItemGroup] = field(
-        default_factory=dict
-    )
+    item_groups: dict[tuple[str, Optional[str]], ItemGroup] = field(default_factory=dict)
 
 
 @dataclass
@@ -295,9 +292,7 @@ class RaveTransaction:
             {
                 "FileType": "Transactional",
                 "FileOID": self.file_oid,
-                "CreationDateTime": datetime.now(timezone.utc).strftime(
-                    "%Y-%m-%dT%H:%M:%S"
-                ),
+                "CreationDateTime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
                 "ODMVersion": "1.3",
             },
         )

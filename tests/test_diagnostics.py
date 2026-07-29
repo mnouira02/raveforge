@@ -8,21 +8,21 @@ SAMPLE_STUDIES_XML = (
     ' FileType="Snapshot" FileOID="abc"'
     ' CreationDateTime="2026-01-01T00:00:00" ODMVersion="1.3">\n'
     '  <Study OID="Mediflex_01">\n'
-    '    <GlobalVariables>\n'
-    '      <StudyName>Mediflex Phase III</StudyName>\n'
-    '    </GlobalVariables>\n'
-    '  </Study>\n'
+    "    <GlobalVariables>\n"
+    "      <StudyName>Mediflex Phase III</StudyName>\n"
+    "    </GlobalVariables>\n"
+    "  </Study>\n"
     '  <Study OID="ACME_Study_02">\n'
-    '    <GlobalVariables>\n'
-    '      <StudyName>ACME Phase II</StudyName>\n'
-    '    </GlobalVariables>\n'
-    '  </Study>\n'
+    "    <GlobalVariables>\n"
+    "      <StudyName>ACME Phase II</StudyName>\n"
+    "    </GlobalVariables>\n"
+    "  </Study>\n"
     '  <Study OID="Pilot_XYZ">\n'
-    '    <GlobalVariables>\n'
-    '      <StudyName>Pilot XYZ</StudyName>\n'
-    '    </GlobalVariables>\n'
-    '  </Study>\n'
-    '</ODM>'
+    "    <GlobalVariables>\n"
+    "      <StudyName>Pilot XYZ</StudyName>\n"
+    "    </GlobalVariables>\n"
+    "  </Study>\n"
+    "</ODM>"
 )
 
 # Realistic RWS response: BOM-prefixed, Medidata namespaces, SiteRef elements
@@ -36,15 +36,15 @@ SAMPLE_SITES_XML_SITEREF = (
     '  <ClinicalData StudyOID="Mediflex_01" MetaDataVersionOID="1">\n'
     '    <SubjectData SubjectKey="dummy">\n'
     '      <SiteRef LocationOID="SITE-001" />\n'
-    '    </SubjectData>\n'
+    "    </SubjectData>\n"
     '    <SubjectData SubjectKey="dummy2">\n'
     '      <SiteRef LocationOID="SITE-002" />\n'
-    '    </SubjectData>\n'
+    "    </SubjectData>\n"
     '    <SubjectData SubjectKey="dummy3">\n'
     '      <SiteRef LocationOID="SITE-ALPHA" />\n'
-    '    </SubjectData>\n'
-    '  </ClinicalData>\n'
-    '</ODM>'
+    "    </SubjectData>\n"
+    "  </ClinicalData>\n"
+    "</ODM>"
 )
 
 # Legacy shape: bare Location elements (no namespace)
@@ -53,7 +53,7 @@ SAMPLE_SITES_XML_BARE_LOCATION = (
     '  <Location OID="SITE-001" />'
     '  <Location OID="SITE-002" />'
     '  <Location OID="SITE-ALPHA" />'
-    '</ODM>'
+    "</ODM>"
 )
 
 # Keep the original constant for backward compat with existing tests
@@ -111,11 +111,7 @@ def test_get_studies_returns_empty_on_malformed_xml():
 
 def test_get_studies_falls_back_to_oid_when_name_missing():
     """Validates that the OID is used as the name when StudyName is absent."""
-    xml = (
-        '<ODM xmlns="http://www.cdisc.org/ns/odm/v1.3">'
-        '<Study OID="NONAME_01"></Study>'
-        '</ODM>'
-    )
+    xml = '<ODM xmlns="http://www.cdisc.org/ns/odm/v1.3"><Study OID="NONAME_01"></Study></ODM>'
     client = Mock()
     client.get_studies_raw.return_value = xml
     diag = RaveDiagnostics(client)
@@ -151,20 +147,20 @@ def test_get_studies_real_rws_snapshot_two_studies():
         ' xmlns:xlink="http://www.w3.org/1999/xlink"'
         ' xmlns="http://www.cdisc.org/ns/odm/v1.3">'
         '  <Study OID="Mediflex(Prod)">'
-        '    <GlobalVariables>'
-        '      <StudyName>Mediflex</StudyName>'
-        '      <StudyDescription />'
-        '      <ProtocolName>Mediflex</ProtocolName>'
-        '    </GlobalVariables>'
-        '  </Study>'
+        "    <GlobalVariables>"
+        "      <StudyName>Mediflex</StudyName>"
+        "      <StudyDescription />"
+        "      <ProtocolName>Mediflex</ProtocolName>"
+        "    </GlobalVariables>"
+        "  </Study>"
         '  <Study OID="Mediflex(Dev)">'
-        '    <GlobalVariables>'
-        '      <StudyName>Mediflex (Dev)</StudyName>'
-        '      <StudyDescription />'
-        '      <ProtocolName>Mediflex</ProtocolName>'
-        '    </GlobalVariables>'
-        '  </Study>'
-        '</ODM>'
+        "    <GlobalVariables>"
+        "      <StudyName>Mediflex (Dev)</StudyName>"
+        "      <StudyDescription />"
+        "      <ProtocolName>Mediflex</ProtocolName>"
+        "    </GlobalVariables>"
+        "  </Study>"
+        "</ODM>"
     )
     client = Mock()
     client.get_studies_raw.return_value = xml
@@ -205,7 +201,7 @@ def test_parse_site_oids_deduplicates():
         '  <SiteRef LocationOID="SITE-001" />'
         '  <SiteRef LocationOID="SITE-001" />'
         '  <Location OID="SITE-001" />'
-        '</ODM>'
+        "</ODM>"
     )
     oids = RaveDiagnostics._parse_site_oids(xml)
     assert oids.count("SITE-001") == 1
@@ -360,9 +356,7 @@ def test_diagnose_study_not_found_exact_match_found():
 
     assert report.category == "study_not_found"
     close_matches = report.evidence["close_matches"]
-    exact = next(
-        (m for m in close_matches if m["value"] == "Mediflex_01"), None
-    )
+    exact = next((m for m in close_matches if m["value"] == "Mediflex_01"), None)
     assert exact is not None
     assert exact["similarity"] == 1.0
 
